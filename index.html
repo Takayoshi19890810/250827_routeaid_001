@@ -58,7 +58,7 @@
   <h1>実車評価支援ツール</h1>
 
   <div class="row">
-    <!-- Safari でも確実に出る素の input -->
+    <!-- Safariでも確実に出る素のinput -->
     <input id="file" type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" />
     <button id="clear">クリア</button>
     <span id="fname" class="small">（未選択）</span>
@@ -94,7 +94,7 @@
 
 <script src="leaflet.js"></script>
 
-<!-- 画像不要のSVGピン（「？」対策） -->
+<!-- 画像不要のSVGピン -->
 <script>
 (function(){
   const svg=encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#2A7FFF"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);
@@ -112,7 +112,7 @@
 const map=L.map('map').setView([35,135],14);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 const me=L.circleMarker([35,135],{radius:7,color:'#0ea5e9',fillOpacity:0.7,weight:3}).addTo(map);
-/* 軌跡は赤色 */
+/* 軌跡は赤 */
 const trackLine=L.polyline([], {color:'#ef4444',weight:5}).addTo(map);
 const checkpointLayer=L.layerGroup().addTo(map);
 
@@ -130,29 +130,52 @@ const $chk=document.getElementById('checkpoint'),$memo=document.getElementById('
 const $th=document.getElementById('th'),$thv=document.getElementById('thv'),$stat=document.getElementById('stat');
 const $recBadge=document.getElementById('recBadge'),$toast=document.getElementById('toast');
 
-/* ====== 音声（iOS 安定化 & キュー） ====== */
+/* ====== 音声（iOS安定化）＋キュー（onend連結） ====== */
 let voiceReady=false, audioCtx=null;
 function getCtx(){ return audioCtx ||= new (window.AudioContext||window.webkitAudioContext)(); }
 function ensureAudio(){ try{ getCtx().resume(); }catch(_){} }
 function unlockTTS(){ try{ ensureAudio(); const c=getCtx(),o=c.createOscillator(),g=c.createGain(); g.gain.value=0.05; o.connect(g).connect(c.destination); const t=c.currentTime; o.start(t); o.stop(t+0.08); voiceReady=true; }catch(_){ } }
-function speakNow(text){
+
+/* onend で次に進む TTS */
+function speakQueued(text, next){
   if(!voiceReady) unlockTTS(); ensureAudio();
   try{
     const u=new SpeechSynthesisUtterance(String(text));
     u.lang='ja-JP'; u.rate=0.85; u.pitch=1; u.volume=1;
     const vs=speechSynthesis.getVoices?.()||[];
-    const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja')); if(ja) u.voice=ja;
-    const go=()=>speechSynthesis.speak(u);
-    if(speechSynthesis.speaking||speechSynthesis.pending){ speechSynthesis.cancel(); setTimeout(go,50); } else go();
-  }catch(_){}
+    const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja'));
+    if(ja) u.voice=ja;
+
+    let settled=false;
+    const proceed=()=>{ if(settled) return; settled=true; next?.(); };
+    u.onend = proceed;
+    u.onerror = proceed;
+
+    // セーフティ：万が一 onend が来ない端末対策（長文でも十分な余裕）
+    const timeoutMs = Math.max(1600, Math.min(8000, text.length*180));
+    const to = setTimeout(proceed, timeoutMs);
+    const clearAll=()=>clearTimeout(to);
+    u.onend = (...a)=>{ clearAll(); proceed(...a); };
+    u.onerror = (...a)=>{ clearAll(); proceed(...a); };
+
+    speechSynthesis.speak(u);
+  }catch(_){ next?.(); }
 }
+
+/* ビープ＆トースト（可視化） */
 function beep(ms=140,f=880){ try{ ensureAudio(); const c=getCtx(),o=c.createOscillator(),g=c.createGain(); g.gain.setValueAtTime(0.08,c.currentTime); o.frequency.value=f; o.connect(g).connect(c.destination); o.start(); o.stop(c.currentTime+ms/1000); }catch(_){ } }
 let toastTimer=null; function toast(msg){ $toast.textContent=msg; $toast.style.display='block'; clearTimeout(toastTimer); toastTimer=setTimeout(()=>{$toast.style.display='none';},2200); }
 
-/* 発話キュー（距離順に順番再生） */
-let ttsQueue=[], ttsPlaying=false;
-function enqueueSpeech(texts){ if(!texts||!texts.length)return; ttsQueue.push(...texts); if(!ttsPlaying) playQueue(); }
-function playQueue(){ if(!ttsQueue.length){ ttsPlaying=false; return; } ttsPlaying=true; const text=ttsQueue.shift(); toast(text); beep(130,880); speakNow(text); setTimeout(playQueue,800); }
+/* 発話キュー（onend 連結版） */
+let q=[]; let playing=false;
+function enqueueSpeech(items){ if(!items||!items.length) return; q.push(...items); if(!playing) playNext(); }
+function playNext(){
+  if(!q.length){ playing=false; return; }
+  playing=true;
+  const text=q.shift();
+  toast(text); beep(130,880);
+  speakQueued(text, ()=>{ setTimeout(playNext, 120); }); // 終了後に少し間をあけて次
+}
 
 /* ====== ファイル読込（KML/KMZ） ====== */
 function clearRoute(){ if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; } routePointLayers.length=0; $fname.textContent='（未選択）'; }
@@ -190,7 +213,7 @@ $file.addEventListener('change', async (ev)=>{
   }catch(e){ alert('ファイル読込に失敗：'+(e?.message||e)); }
 });
 
-/* ====== 判定：半径内を距離順で読む（テキスト収集版） ====== */
+/* ====== 判定：半径内を距離順で読む（テキスト収集） ====== */
 function collectNearTexts(here){
   const list=[...routePointLayers, ...Object.values(checkpointLayer._layers||{})];
   const hits=[];
@@ -216,7 +239,7 @@ function checkNearAndSpeak(here){
 }
 
 /* ====== UI操作 ====== */
-document.getElementById('tts').onclick=()=>{ unlockTTS(); setTimeout(()=>enqueueSpeech(['テストです']),120); };
+document.getElementById('tts').onclick=()=>{ unlockTTS(); enqueueSpeech(['テストです']); };
 $th.oninput=()=>{ notifyMeters=+$th.value; $thv.textContent=`${notifyMeters}m`; };
 
 $track.onclick=()=>{
@@ -229,25 +252,27 @@ $track.onclick=()=>{
   $recBadge.style.display='flex'; startPulse();
   trackLine.setLatLngs([]); checkpointLayer.clearLayers();
 
-  // 1) まず「評価を開始します」
-  // 2) 続けて、現時点で半径内のポイントを読み上げ（順番キュー）
-  setTimeout(()=>{
-    let texts=[];
-    if(lastLatLng) texts = collectNearTexts(L.latLng(lastLatLng));
-    enqueueSpeech(['評価を開始します', ...texts]);
-  },120);
+  // 先に「評価を開始します」→終わってから近傍ポイント（onend連結）
+  const afterStart=()=>{
+    if(lastLatLng){
+      const texts=collectNearTexts(L.latLng(lastLatLng));
+      if(texts.length) enqueueSpeech(texts);
+    }
+  };
+  enqueueSpeech(['評価を開始します']);
+  // onend に合わせて afterStart が走るよう、キュー末尾に入れる
+  // （上の playNext は終了ごとに次を読む仕組みなので、この順でOK）
 
-  // 即時の単発測位（許可プロンプト & その場判定）
+  // 即時測位（許可プロンプト & その場判定もキューへ）
   if(navigator.geolocation){
     navigator.geolocation.getCurrentPosition(pos=>{
       lastLatLng=[pos.coords.latitude,pos.coords.longitude];
       me.setLatLng(lastLatLng); map.setView(lastLatLng,16);
-      // 「評価を開始します」の後に続けて読まれる（キューに後入れ）
       checkNearAndSpeak(L.latLng(lastLatLng));
     },()=>{}, {enableHighAccuracy:true,timeout:8000});
   }
 
-  // 開始直後 20秒は2秒おきに再チェック（初期誤差対策）
+  // 開始直後 20秒は2秒おきに再チェック（周辺密集対策）
   let sweep=0; clearInterval(startupSweepTimer);
   startupSweepTimer=setInterval(()=>{
     if(!tracking){ clearInterval(startupSweepTimer); return; }
@@ -274,7 +299,7 @@ $stop.onclick=()=>{
   $track.disabled=false; $stop.disabled=true;
   $recBadge.style.display='none'; stopPulse();
 
-  // 停止時に必ずアナウンス
+  // 停止時アナウンス
   unlockTTS();
   enqueueSpeech(['評価を終了します']);
 };
