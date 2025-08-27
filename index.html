@@ -8,7 +8,6 @@
 <style>
   html,body,#map{height:100%;margin:0}
   #map{background:#f2f2f2; transform-origin:center center;}
-  /* ---- パネル（昔の雰囲気に寄せたコンパクトUI） ---- */
   #panel{
     position:absolute;left:10px;top:10px;z-index:1000;
     background:#fff;padding:10px 12px;border-radius:12px;
@@ -20,7 +19,11 @@
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}
   .row > label{white-space:nowrap}
   .small{font-size:11px;color:#555}
-  button{padding:6px 10px;border-radius:10px;cursor:pointer;border:1px solid #ddd;background:#fff}
+  button{
+    padding:10px 14px;               /* ← タップ領域拡大 */
+    min-height:40px;                  /* ← タップ領域拡大 */
+    border-radius:12px;cursor:pointer;border:1px solid #ddd;background:#fff
+  }
   #start{background:#16a34a;color:#fff;border-color:#16a34a}
   #stop{background:#ef4444;color:#fff;border-color:#ef4444}
   #recenter{background:#0ea5e9;color:#fff;border-color:#0ea5e9}
@@ -39,6 +42,13 @@
     background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:12px;
     box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px
   }
+  /* 右下の停止FAB（押しやすい大ボタン） */
+  #fabStop{
+    position:absolute;right:14px;bottom:14px;z-index:1003;display:none;
+    width:64px;height:64px;border-radius:50%;border:none;
+    box-shadow:0 10px 28px rgba(0,0,0,.25);
+    background:#ef4444;color:#fff;font-size:15px;font-weight:700;
+  }
   #compass{
     position:absolute;right:14px;top:74px;z-index:1000;
     width:44px;height:44px;border-radius:50%;background:#fff;
@@ -53,6 +63,9 @@
 <div id="recBadge"><span class="dot"></span>追跡中</div>
 <div id="toast"></div>
 <div id="compass"><div id="compassArrow"></div><div style="font-size:10px;margin-top:2px">N</div></div>
+
+<!-- 押しやすい停止ボタン -->
+<button id="fabStop" aria-label="追跡終了">停止</button>
 
 <div id="panel">
   <h1>実車評価支援ツール</h1>
@@ -97,14 +110,13 @@
 
 <script src="leaflet.js"></script>
 
-<!-- ピン：青=意味あるKMLポイント / 灰=ルート汎用ピン（非読み上げ） / 橙=手動CP -->
+<!-- ピン（青=意味あり / 灰=ルート汎用 / 橙=手動CP） -->
 <script>
 (function(){
   function svg(color){return encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36">
       <path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="${color}"/>
-      <circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`
-  );}
+      <circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);}
   const Blue   = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${svg('#2A7FFF')}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
   const Orange = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${svg('#F59E0B')}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
   const Gray   = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${svg('#9CA3AF')}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
@@ -119,28 +131,26 @@
 <script src="togeojson.umd.js"></script>
 
 <script>
-/* ====== 地図 ====== */
+/* ====== 地図とレイヤ ====== */
 const map=L.map('map').setView([35,135],14);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 const me=L.circleMarker([35,135],{radius:7,color:'#0ea5e9',fillOpacity:0.7,weight:3}).addTo(map);
 const trackLine=L.polyline([], {color:'#ef4444',weight:5}).addTo(map);
 const checkpointLayer=L.layerGroup().addTo(map);
 
-/* ====== 状態・DOM ====== */
+/* ====== 状態 ====== */
 let lastLatLng=null, prevLatLng=null, tracking=false, watchId=null, pulseTimer=null, startupSweepTimer=null;
-let notifyMeters=100;
-let routeLayer=null;
-const routePointLayers=[];        // 読み上げ対象ポイント
-const genericPointLayers=[];      // ルート汎用ピン（表示のみ）
+let notifyMeters=100, routeLayer=null;
+const routePointLayers=[], genericPointLayers=[];
 
+/* ====== DOM ====== */
 const $file=file,$clear=clear,$fname=fname;
-const $start=start,$stop=stop,$recenter=recenter,$cp=cp,$withMemo=withMemo;
+const $start=start,$stop=stop,$fabStop=fabStop,$recenter=recenter,$cp=cp,$withMemo=withMemo;
 const $th=th,$stat=stat,$recBadge=recBadge,$toast=toast;
 const $wake=wake,$keepCentered=keepCentered;
 const $compass=compass,$compassArrow=compassArrow;
 const $saveGpx=saveGpx,$saveGeo=saveGeo;
 let orientationMode='north';
-
 document.querySelectorAll('input[name=orient]').forEach(r=>{
   r.addEventListener('change',()=>{
     orientationMode=r.value;
@@ -149,7 +159,7 @@ document.querySelectorAll('input[name=orient]').forEach(r=>{
   });
 });
 
-/* ====== 音声：iOS安定化＋キュー ====== */
+/* ====== 音声（iOS安定化）＋キュー ====== */
 let voiceReady=false, audioCtx=null;
 function getCtx(){ return audioCtx ||= new (window.AudioContext||window.webkitAudioContext)(); }
 function ensureAudio(){ try{ getCtx().resume(); }catch(_){} }
@@ -161,7 +171,8 @@ function speakQueued(text,next){
     u.lang='ja-JP'; u.rate=0.85; u.pitch=1; u.volume=1;
     const vs=speechSynthesis.getVoices?.()||[]; const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja')); if(ja) u.voice=ja;
     let settled=false; const proceed=()=>{ if(settled) return; settled=true; next?.(); };
-    const timeoutMs=Math.max(1600,Math.min(8000,text.length*180)); const to=setTimeout(proceed,timeoutMs);
+    const timeoutMs=Math.max(1600,Math.min(8000,text.length*180));
+    const to=setTimeout(proceed,timeoutMs);
     u.onend=()=>{clearTimeout(to); proceed();}; u.onerror=()=>{clearTimeout(to); proceed();};
     speechSynthesis.speak(u);
   }catch(_){ next?.(); }
@@ -173,14 +184,14 @@ function enqueueSpeech(items){ if(!items||!items.length) return; q.push(...items
 function playNext(){ if(!q.length){ playing=false; return; } playing=true; const text=q.shift(); showToast(text); beep(130,880); speakQueued(text, ()=>setTimeout(playNext,120)); }
 document.getElementById('tts').onclick=()=>{ unlockTTS(); enqueueSpeech(['テストです']); };
 
-/* ====== Wake Lock（画面オフ防止） ====== */
+/* ====== Wake Lock ====== */
 let wakeLock=null;
-async function enableWake(){ try{ if('wakeLock' in navigator){ wakeLock=await navigator.wakeLock.request('screen'); $wake.textContent='画面オフ防止: ON'; wakeLock.addEventListener('release',()=>{$wake.textContent='画面オフ防止: OFF';}); } else { alert('端末が Wake Lock に未対応です。iPhoneの自動ロックを「しない」にしてください。'); } }catch(e){ alert('Wake Lock を取得できませんでした。'); } }
+async function enableWake(){ try{ if('wakeLock' in navigator){ wakeLock=await navigator.wakeLock.request('screen'); $wake.textContent='画面オフ防止: ON'; wakeLock.addEventListener('release',()=>{$wake.textContent='画面オフ防止: OFF';}); } else { alert('端末が Wake Lock 未対応です。iPhoneの自動ロックを「しない」にしてください。'); } }catch(e){ alert('Wake Lock を取得できませんでした。'); } }
 async function disableWake(){ try{ await wakeLock?.release(); }catch(_){ } wakeLock=null; $wake.textContent='画面オフ防止: OFF'; }
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && wakeLock) enableWake(); });
 $wake.onclick=()=>{ if(wakeLock) disableWake(); else enableWake(); };
 
-/* ====== MyMaps メモ抽出 ====== */
+/* ====== メモ抽出 ====== */
 function stripHtml(x){ if (!x) return ''; const d=document.createElement('div'); d.innerHTML=String(x); return (d.textContent||d.innerText||'').replace(/\s+/g,' ').trim(); }
 function firstNonEmpty(a){ for(const v of a){ if(v!=null && String(v).trim()!=='') return v; } return ''; }
 function extractMemo(p){
@@ -207,7 +218,7 @@ $file.addEventListener('change', async ev=>{
       const buf=await f.arrayBuffer(); const zip=await JSZip.loadAsync(buf);
       const ent=Object.values(zip.files).find(z=>z.name.toLowerCase().endsWith('.kml'));
       if(!ent){ alert('KMZ内にKMLがありません'); return; }
-      kmlText=await ent.async('string');   // iOSはstringが安定
+      kmlText=await ent.async('string');
     }else{ kmlText=await f.text(); }
     const dom=new DOMParser().parseFromString(kmlText,'text/xml');
     const gj=toGeoJSON.kml(dom);
@@ -236,7 +247,7 @@ $file.addEventListener('change', async ev=>{
   }catch(e){ alert('ファイル読込に失敗：'+(e?.message||e)); }
 });
 
-/* ====== 判定：半径内を距離順で読む（意味ある点＋手動CPのみ） ====== */
+/* ====== 近接読み上げ ====== */
 function collectNearTexts(here){
   const list=[...routePointLayers, ...Object.values(checkpointLayer._layers||{})];
   const hits=[];
@@ -260,7 +271,7 @@ function collectNearTexts(here){
 }
 function checkNearAndSpeak(here){ const texts=collectNearTexts(here); if(texts.length) enqueueSpeech(texts); }
 
-/* ====== 進行方向と地図回転 ====== */
+/* ====== 方位・回転 ====== */
 let currentBearing=0;
 function bearingBetween(a,b){
   const toRad=d=>d*Math.PI/180, toDeg=r=>r*180/Math.PI;
@@ -275,12 +286,10 @@ function rotateMap(bearingDeg){
   $compassArrow.style.transform=`rotate(${bearingDeg}deg)`;
 }
 
-/* ====== 追跡制御 ====== */
-$th.oninput=()=>{ const v=+$th.value||100; notifyMeters=Math.max(10,Math.min(10000,v)); };
-
-$start.onclick=()=>{
+/* ====== 追跡開始/終了（共通化） ====== */
+function startTracking(){
   if(tracking) return; unlockTTS();
-  tracking=true; $start.disabled=true; $stop.disabled=false; $recBadge.style.display='flex';
+  tracking=true; $start.disabled=true; $stop.disabled=false; $fabStop.style.display='block'; $recBadge.style.display='flex';
   trackLine.setLatLngs([]); checkpointLayer.clearLayers();
   enqueueSpeech(['評価を開始します']);
   if(lastLatLng){ const t=collectNearTexts(L.latLng(lastLatLng)); if(t.length) enqueueSpeech(t); }
@@ -316,20 +325,26 @@ $start.onclick=()=>{
     checkNearAndSpeak(here);
   },err=>{ $stat.textContent=`位置エラー: ${err.message}`; },
   {enableHighAccuracy:true,maximumAge:1000,timeout:10000});
-};
-
-$stop.onclick=()=>{
+}
+function stopTracking(){
   if(!tracking) return;
   tracking=false;
   navigator.geolocation.clearWatch?.(watchId); watchId=null;
   clearInterval(startupSweepTimer);
-  $start.disabled=false; $stop.disabled=true; $recBadge.style.display='none';
+  $start.disabled=false; $stop.disabled=true; $fabStop.style.display='none'; $recBadge.style.display='none';
   rotateMap(0); $compass.style.display='none';
   unlockTTS(); enqueueSpeech(['評価を終了します']);
-  // 停止後に保存ボタンを有効化
-  $saveGpx.disabled=false; $saveGeo.disabled=false;
-};
+  $saveGpx.disabled=false; $saveGeo.disabled=false; // 保存を有効化
+}
 
+/* ハンドラ割当（どちらを押しても止まる） */
+$start.addEventListener('click', startTracking, {passive:true});
+$stop .addEventListener('click', stopTracking , {passive:true});
+$fabStop.addEventListener('click', stopTracking , {passive:true});
+
+/* その他操作 */
+$th.oninput=()=>{ const v=+$th.value||100; notifyMeters=Math.max(10,Math.min(10000,v)); };
+$recenter.onclick=()=>{ if(lastLatLng) map.setView(lastLatLng,16); };
 $cp.onclick=()=>{
   if(!lastLatLng){ alert("現在地が取得できていません"); return; }
   let memo=''; if($withMemo.checked) memo=prompt("メモ入力（任意）","");
@@ -340,8 +355,6 @@ $cp.onclick=()=>{
   checkNearAndSpeak(L.latLng(lastLatLng));
 };
 
-$recenter.onclick=()=>{ if(lastLatLng) map.setView(lastLatLng,16); };
-
 /* 初回位置 */
 if(navigator.geolocation){
   navigator.geolocation.getCurrentPosition(pos=>{
@@ -350,7 +363,7 @@ if(navigator.geolocation){
   },()=>{});
 }
 
-/* ====== 保存（GPX / GeoJSON） ====== */
+/* ====== 保存 ====== */
 function saveBlob(u8, name, type){
   const blob=new Blob([u8],{type}); const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href);
