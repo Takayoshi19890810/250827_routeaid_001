@@ -69,12 +69,12 @@ const POIS=window.ROUTE_AID_POIS||[];
 // 再通知設定（移動中 300m ごと）
 const REANNOUNCE_EVERY_M = 300;
 let movedSinceAnnounce = 0;
+let lastFixTs = null;
 
 function pickJaVoice(){ try{const vs=speechSynthesis.getVoices(); const ja=vs.filter(v=>(v.lang||'').toLowerCase().startsWith('ja')); return ja[0]||vs[0]||null;}catch(_){return null;} }
 function speak(text){ try{ speechSynthesis.cancel(); let u=new SpeechSynthesisUtterance(text); u.lang='ja-JP'; u.rate=0.95; const v=pickJaVoice(); if(v) u.voice=v; speechSynthesis.speak(u);}catch(e){console.warn(e);} }
 function speakThen(text,next){ try{ speechSynthesis.cancel(); let u=new SpeechSynthesisUtterance(text); u.lang='ja-JP'; u.rate=0.95; const v=pickJaVoice(); if(v) u.voice=v; u.onend=()=>setTimeout(()=>next&&next(),150); speechSynthesis.speak(u);}catch(e){next&&next();} }
-// 音声エンジンを事前ウォームアップ
-if('speechSynthesis' in window){ try{ speechSynthesis.getVoices(); }catch(_){} try{ speechSynthesis.onvoiceschanged=()=>{ try{ speechSynthesis.getVoices(); }catch(_){} }; }catch(_){} }catch(e){next&&next();} }
+if('speechSynthesis' in window){ try{ speechSynthesis.getVoices(); }catch(_){} try{ speechSynthesis.onvoiceschanged=()=>{ try{ speechSynthesis.getVoices(); }catch(_){} }; }catch(_){} }
 
 function init(){
   map=L.map('map');
@@ -90,7 +90,6 @@ function init(){
   document.getElementById('btnPickDir').onclick=pickDirectory;
   const nr=document.getElementById('notifyRadius'); if(nr){ nr.onchange=()=>{ const r=parseFloat(nr.value)||200; if(notifyCircle) notifyCircle.setRadius(r); }; }
   document.getElementById('fname').value=defaultFileName();
-  document.getElementById('fname').value=defaultFileName();
 }
 
 function toast(m,ms=1600){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),ms);}
@@ -98,7 +97,7 @@ function defaultFileName(){const d=new Date();const pad=n=>String(n).padStart(2,
 
 function startTracking(){ if(!('geolocation'in navigator)){toast('位置情報未対応');return;} points=[];distMeters=0;movedSinceAnnounce=0;updateStats();trackLine.setLatLngs([]);if(currentMarker)currentMarker.remove(); speak('これから評価開始します'); initialPOIAnnounced=false; watchId=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:1000,timeout:20000}); startTime=new Date(); if(elapsedTimer)clearInterval(elapsedTimer); elapsedTimer=setInterval(updateElapsed,1000); setButtons({running:true}); setRunStatus('running'); document.getElementById('btnStart').classList.add('running'); document.getElementById('recBadge').classList.remove('hidden'); toast('評価を開始します（追跡開始）'); }
 
-function onPos(pos){ const {latitude:lat,longitude:lng}=pos.coords; const t=new Date(); const last=points.length?points[points.length-1]:null; const p={lat,lng,t:t.toISOString()}; points.push(p); let delta=0; if(last){ delta=haversine(last.lat,last.lng,lat,lng); distMeters+=delta; movedSinceAnnounce+=delta; } trackLine.addLatLng([lat,lng]); if(!currentMarker) currentMarker=L.marker([lat,lng]).addTo(map); else currentMarker.setLatLng([lat,lng]); if(following) map.setView([lat,lng],Math.max(map.getZoom(),16),{animate:false}); const r=parseFloat(document.getElementById('notifyRadius')?.value)||200; if(notifyCircle){notifyCircle.setLatLng([lat,lng]);notifyCircle.setRadius(r);}else{notifyCircle=L.circle([lat,lng],{radius:r,fillColor:'#3b82f6',fillOpacity:0.15,color:'#2563eb',weight:1}).addTo(map);} if(!initialPOIAnnounced){ speakThen('範囲内のポイントをお知らせします',()=>announceNearbyWithinRadius(lat,lng,r)); initialPOIAnnounced=true; movedSinceAnnounce=0; } else if(movedSinceAnnounce>=REANNOUNCE_EVERY_M){ speakThen('近くのポイントをお知らせします',()=>announceNearbyWithinRadius(lat,lng,r)); movedSinceAnnounce=0; } updateStats(); }
+function onPos(pos){ const {latitude:lat,longitude:lng}=pos.coords; const t=new Date(); lastFixTs=Date.now(); const last=points.length?points[points.length-1]:null; const p={lat,lng,t:t.toISOString()}; points.push(p); let delta=0; if(last){ delta=haversine(last.lat,last.lng,lat,lng); distMeters+=delta; movedSinceAnnounce+=delta; } trackLine.addLatLng([lat,lng]); if(!currentMarker) currentMarker=L.marker([lat,lng]).addTo(map); else currentMarker.setLatLng([lat,lng]); if(following) map.setView([lat,lng],Math.max(map.getZoom(),16),{animate:false}); const r=parseFloat(document.getElementById('notifyRadius')?.value)||200; if(notifyCircle){notifyCircle.setLatLng([lat,lng]);notifyCircle.setRadius(r);}else{notifyCircle=L.circle([lat,lng],{radius:r,fillColor:'#3b82f6',fillOpacity:0.15,color:'#2563eb',weight:1}).addTo(map);} if(!initialPOIAnnounced){ speakThen('範囲内のポイントをお知らせします',()=>announceNearbyWithinRadius(lat,lng,r)); initialPOIAnnounced=true; movedSinceAnnounce=0; } else if(movedSinceAnnounce>=REANNOUNCE_EVERY_M){ speakThen('近くのポイントをお知らせします',()=>announceNearbyWithinRadius(lat,lng,r)); movedSinceAnnounce=0; } updateStats(); }
 
 function onErr(e){console.warn('Geo error',e);toast('位置情報取得失敗');}
 function pauseTracking(){ if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null;clearInterval(elapsedTimer);setButtons({paused:true});setRunStatus('paused');toast('一時停止');} }
@@ -107,7 +106,10 @@ function stopTracking(){ if(watchId!=null){navigator.geolocation.clearWatch(watc
 
 function setButtons(st){const s=document.getElementById('btnStart'),p=document.getElementById('btnPause'),r=document.getElementById('btnResume'),stp=document.getElementById('btnStop'),g=document.getElementById('btnSaveGPX'),j=document.getElementById('btnSaveGeoJSON');if(st.running){s.disabled=true;p.disabled=false;r.disabled=true;stp.disabled=false;g.disabled=true;j.disabled=true;} else if(st.paused){s.disabled=true;p.disabled=true;r.disabled=false;stp.disabled=false;g.disabled=true;j.disabled=true;} else if(st.stopped){s.disabled=false;p.disabled=true;r.disabled=true;stp.disabled=true;g.disabled=false;j.disabled=false;} else{s.disabled=false;p.disabled=true;r.disabled=true;stp.disabled=true;g.disabled=true;j.disabled=true;} }
 
-function updateStats(){document.getElementById('pts').textContent=points.length; document.getElementById('dist').textContent=(distMeters/1000).toFixed(2);} 
+function updateStats(){document.getElementById('pts').textContent=points.length; document.getElementById('dist').textContent=(distMeters/1000).toFixed(2); // GPS信号確認
+  if(startTime && lastFixTs){ const ageSec=Math.floor((Date.now()-lastFixTs)/1000); if(ageSec>15){ toast('GPS信号が弱いです'); } }
+}
+
 function announceNearbyWithinRadius(lat,lng,r){ if(!POIS.length) return; const withD=POIS.map(o=>({...o,d:haversine(lat,lng,o.lat,o.lng)})).filter(o=>o.d<=r).sort((a,b)=>a.d-b.d); if(!withD.length){speak('範囲内のポイントはありません');return;} let i=0; const sayNext=()=>{ if(i>=withD.length) return; const o=withD[i++]; speak(`${o.name||'スポット'}、距離 ${Math.round(o.d)} メートル${o.note? '。メモ、'+o.note:''}`); setTimeout(sayNext,700); }; sayNext(); }
 
 function saveTrack(fmt){ if(points.length<2){toast('保存できる軌跡がありません');return;} const nameRaw=(document.getElementById('fname').value||defaultFileName()).trim(); const safe=nameRaw.replace(/[^\w\-_.]/g,'_'); const filename=fmt==='gpx'?`${safe}.gpx`:`${safe}.geojson`; let dataStr,mime; if(fmt==='gpx'){dataStr=buildGPX(points);mime='application/gpx+xml';}else{dataStr=JSON.stringify(buildGeoJSON(points),null,2);mime='application/geo+json';} const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([dataStr],{type:mime})); a.download=filename; document.body.appendChild(a); a.click(); a.remove(); toast('ダウンロードを開始しました'); }
@@ -117,9 +119,4 @@ function buildGPX(pts){const esc=s=>s.replace(/[<&>]/g,c=>({'<':'&lt;','&':'&amp
 
 async function pickDirectory(){ if(!('showDirectoryPicker'in window)){toast('未対応ブラウザ');return;} try{dirHandle=await showDirectoryPicker({mode:'readwrite'});document.getElementById('dirLabel').textContent='指定済み';}catch(e){} }
 function haversine(lat1,lon1,lat2,lon2){const R=6371000;const toRad=d=>d*Math.PI/180;const dLat=toRad(lat2-lat1),dLon=toRad(lon2-lon1);const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;const c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));return R*c;}
-function setRunStatus(m){const pill=document.getElementById('runStatus');const text=document.getElementById('runStatusText');pill.classList.remove('status-idle','status-running','status-paused','status-stopped');if(m==='running'){pill.classList.add('status-running');text.textContent='追跡中';}else if(m==='paused'){pill.classList.add('status-paused');text.textContent='一時停止';}else if(m==='stopped'){pill.classList.add('status-stopped');text.textContent='停止';}else{pill.classList.add('status-idle');text.textContent='待機中';}}
-function updateElapsed(){if(!startTime) return;const sec=Math.floor((new Date()-startTime)/1000);const h=String(Math.floor(sec/3600)).padStart(2,'0');const m=String(Math.floor((sec%3600)/60)).padStart(2,'0');const s=String(sec%60).padStart(2,'0');document.getElementById('elapsed').textContent=`${h}:${m}:${s}`;}
-init(); setRunStatus('idle');
-</script>
-</body>
-</html>
+function setRunStatus(m){const pill=document.getElementById('runStatus');const text=document.getElementById('runStatusText');pill.classList.remove('status-idle','status-running','status-paused','status-stopped');if(m==='running'){pill.classList.add('status-running');text.textContent='追跡中';}else if(m==='paused'){pill.classList.add('status-paused');text.textContent='一時停止';}else if(m==='stopped'){pill.classList.add('status-stopped');text.textContent='停止';}else{pill
