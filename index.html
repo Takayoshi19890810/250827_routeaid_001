@@ -122,13 +122,12 @@ const me=L.circleMarker([35,135],{radius:7,color:'#0ea5e9',fillOpacity:0.7,weigh
 const trackLine=L.polyline([], {color:'#ef4444',weight:5}).addTo(map);
 const checkpointLayer=L.layerGroup().addTo(map);
 
-/* ====== 状態 ====== */
+/* ====== 状態・DOM（※ここで一度だけ宣言） ====== */
 let lastLatLng=null, tracking=false, watchId=null, pulseTimer=null, startupSweepTimer=null;
-let notifyMeters=100;
+let notifyMeters=100;                 // ← 二重に宣言しない
 let routeLayer=null;
 const routePointLayers=[];
 
-/* ====== DOM ====== */
 const $file=document.getElementById('file'),$clear=document.getElementById('clear'),$fname=document.getElementById('fname');
 const $track=document.getElementById('track'),$stop=document.getElementById('stop');
 const $rec=document.getElementById('recenter'),$fab=document.getElementById('fab-recenter');
@@ -206,7 +205,7 @@ document.addEventListener('visibilitychange', ()=> {
 });
 $keepAwake.onclick = ()=> { if (wakeLock) disableWakeLock(); else enableWakeLock(); };
 
-/* ====== My Maps の description/ExtendedData から“メモ”を頑強に抽出 ====== */
+/* ====== My Maps の description/ExtendedData から“メモ”抽出 ====== */
 function stripHtml(x){
   if (!x) return '';
   const div=document.createElement('div'); div.innerHTML=String(x);
@@ -215,7 +214,7 @@ function stripHtml(x){
 function firstNonEmpty(arr){ for(const v of arr){ if(v!=null && String(v).trim()!=='') return v; } return ''; }
 function extractMemo(props){
   if(!props || typeof props!=='object') return '';
-  // 1) よくあるプロパティ
+  // 1) 直接の候補
   const direct = firstNonEmpty([
     props.memo, props.Memo,
     props.description, props.Description,
@@ -224,44 +223,33 @@ function extractMemo(props){
     props['メモ'], props['説明'], props['概要']
   ]);
   if (direct) return stripHtml(direct);
-
-  // 2) ExtendedData（toGeoJSONが入れることあり）
+  // 2) ExtendedData 各種
   const ed = props.ExtendedData || props.extendedData || props.extendeddata || {};
-  // 2-1) {Data:[{name:'説明', value:'...'}]} 形式
   try{
     const arr = Array.isArray(ed.Data)? ed.Data : Array.isArray(ed.data)? ed.data : null;
-    if (arr) {
-      for(const item of arr){
-        const k=item?.name||item?.Name||'';
-        const v=item?.value||item?.Value||'';
-        if(/desc|memo|note|説明|概要/i.test(k) && stripHtml(v)) return stripHtml(v);
-      }
+    if (arr) for(const item of arr){
+      const k=item?.name||item?.Name||''; const v=item?.value||item?.Value||'';
+      if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v);
     }
   }catch(_){}
-  // 2-2) {SchemaData:[{SimpleData:[{name:'説明', _text:'...'}]}]} 形式
   try{
     const sds = ed.SchemaData || ed.schemadata || [];
     for(const s of (Array.isArray(sds)?sds:[sds])){
       const sims = s?.SimpleData || s?.simpledata || [];
       for(const sd of (Array.isArray(sims)?sims:[sims])){
-        const k=sd?.name||sd?.Name||'';
-        const v=sd?._text||sd?.text||sd?.value||'';
-        if(/desc|memo|note|説明|概要/i.test(k) && stripHtml(v)) return stripHtml(v);
+        const k=sd?.name||sd?.Name||''; const v=sd?._text||sd?.text||sd?.value||'';
+        if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v);
       }
     }
   }catch(_){}
-  // 2-3) キー→値の素直な連想形式
   try{
     for(const k of Object.keys(ed)){
-      const v = ed[k];
-      if(/desc|memo|note|説明|概要/i.test(k) && stripHtml(v)) return stripHtml(v);
+      const v=ed[k];
+      if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v);
     }
   }catch(_){}
-
-  // 3) props 内に "html" 的なフィールドが入るパターン
   const htmlish = firstNonEmpty([props.descriptionHtml, props.balloonText, props.BalloonText]);
   if (htmlish) return stripHtml(htmlish);
-
   return '';
 }
 
@@ -307,7 +295,6 @@ $file.addEventListener('change', async (ev)=>{
 });
 
 /* ====== 判定：半径内を距離順で読む ====== */
-let notifyMeters=100;
 function collectNearTexts(here){
   const list=[...routePointLayers, ...Object.values(checkpointLayer._layers||{})];
   const hits=[];
@@ -319,7 +306,7 @@ function collectNearTexts(here){
     const name=(p.name||'').trim();
     const memo=(p.memo||'').trim();
     if(dist<=notifyMeters){
-      const memoShort = memo.length>100 ? memo.slice(0,100)+'…' : memo; // 長文は少し丸める
+      const memoShort = memo.length>100 ? memo.slice(0,100)+'…' : memo;
       const text=(name||memoShort)?[name,memoShort].filter(Boolean).join('。'):'チェックポイント';
       hits.push({dist,text,layer});
     }
@@ -336,12 +323,7 @@ function checkNearAndSpeak(here){
 
 /* ====== UI操作 ====== */
 document.getElementById('tts').onclick=()=>{ unlockTTS(); enqueueSpeech(['テストです']); };
-const $th=document.getElementById('th'),$thv=document.getElementById('thv');
 $th.oninput=()=>{ notifyMeters=+$th.value; $thv.textContent=`${notifyMeters}m`; };
-
-const $track=document.getElementById('track'),$stop=document.getElementById('stop');
-const $rec=document.getElementById('recenter'),$fab=document.getElementById('fab-recenter');
-const $chk=document.getElementById('checkpoint'),$memo=document.getElementById('withMemo');
 
 $track.onclick=()=>{
   if(tracking) return;
@@ -349,7 +331,7 @@ $track.onclick=()=>{
 
   tracking=true;
   $track.disabled=true; $stop.disabled=false;
-  document.getElementById('recBadge').style.display='flex'; startPulse();
+  $recBadge.style.display='flex'; startPulse();
   trackLine.setLatLngs([]); checkpointLayer.clearLayers();
 
   // 1) まず「評価を開始します」→ 2) その後に近傍ポイント
@@ -381,7 +363,7 @@ $track.onclick=()=>{
     lastLatLng=[pos.coords.latitude,pos.coords.longitude];
     me.setLatLng(lastLatLng); trackLine.addLatLng(lastLatLng);
     checkNearAndSpeak(L.latLng(lastLatLng));
-  },err=>{ document.getElementById('stat').textContent=`位置エラー: ${err.message}`; },
+  },err=>{ $stat.textContent=`位置エラー: ${err.message}`; },
   {enableHighAccuracy:true,maximumAge:1000,timeout:10000});
 };
 
@@ -393,7 +375,7 @@ $stop.onclick=()=>{
   clearInterval(startupSweepTimer);
 
   $track.disabled=false; $stop.disabled=true;
-  document.getElementById('recBadge').style.display='none'; stopPulse();
+  $recBadge.style.display='none'; stopPulse();
 
   // 停止時アナウンス
   unlockTTS();
