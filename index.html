@@ -4,18 +4,11 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>実車評価支援ツール</title>
-<link rel="stylesheet" href="leaflet.css?v=250840" />
+<link rel="stylesheet" href="leaflet.css?v=250841" />
 <style>
   html,body,#map{height:100%;margin:0}
   #map{background:#f2f2f2}
-  /* 左上のカードUI */
-  #panel{
-    position:absolute;left:10px;top:10px;z-index:1000;
-    background:#fff;padding:10px 12px;border-radius:14px;
-    box-shadow:0 6px 24px rgba(0,0,0,.18);
-    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;
-    min-width:300px;max-width:min(94vw,460px)
-  }
+  #panel{position:absolute;left:10px;top:10px;z-index:1000;background:#fff;padding:10px 12px;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;min-width:300px;max-width:min(94vw,460px)}
   #panel h1{margin:0 0 8px;font-size:14px;font-weight:700}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}
   .small{font-size:11px;color:#555}
@@ -25,29 +18,11 @@
   #recenter{background:#0ea5e9;color:#fff;border-color:#0ea5e9}
   #checkpoint{background:#f59e0b;color:#fff;border-color:#f59e0b}
   #export{background:#6366f1;color:#fff;border-color:#6366f1}
-  /* 右下の現在地ボタン */
-  #fab-recenter{
-    position:absolute;right:14px;bottom:14px;z-index:1000;
-    width:50px;height:50px;border-radius:50%;
-    display:grid;place-items:center;background:#0ea5e9;color:#fff;
-    font-size:20px;border:none;box-shadow:0 6px 24px rgba(0,0,0,.18)
-  }
-  /* 追跡中バッジ */
-  #recBadge{
-    position:absolute;right:12px;top:12px;z-index:1001;display:none;align-items:center;gap:6px;
-    background:rgba(239,68,68,.95);color:#fff;padding:6px 10px;border-radius:9999px;
-    box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:12px
-  }
+  #fab-recenter{position:absolute;right:14px;bottom:14px;z-index:1000;width:50px;height:50px;border-radius:50%;display:grid;place-items:center;background:#0ea5e9;color:#fff;font-size:20px;border:none;box-shadow:0 6px 24px rgba(0,0,0,.18)}
+  #recBadge{position:absolute;right:12px;top:12px;z-index:1001;display:none;align-items:center;gap:6px;background:rgba(239,68,68,.95);color:#fff;padding:6px 10px;border-radius:9999px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:12px}
   .dot{width:10px;height:10px;border-radius:50%;background:#fff;animation:blink 1s infinite}
   @keyframes blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
-
-  /* 画面下のトースト */
-  #toast{
-    position:absolute;left:50%;bottom:78px;transform:translateX(-50%);
-    z-index:1002;display:none;max-width:min(92vw,520px);
-    background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:12px;
-    box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px
-  }
+  #toast{position:absolute;left:50%;bottom:78px;transform:translateX(-50%);z-index:1002;display:none;max-width:min(92vw,520px);background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px}
 </style>
 </head>
 <body>
@@ -57,35 +32,28 @@
 
 <div id="panel">
   <h1>実車評価支援ツール</h1>
-
-  <!-- Safariでも確実に出る素のファイル入力 -->
   <div class="row">
     <input id="file" type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" />
     <button id="clear">クリア</button>
     <span id="fname" class="small">（未選択）</span>
   </div>
-
   <div class="row">
     <button id="track">追跡開始</button>
     <button id="stop" disabled>停止</button>
     <button id="recenter">現在地へ</button>
   </div>
-
   <div class="row">
     <button id="checkpoint">チェックポイント</button>
     <label><input type="checkbox" id="withMemo" />メモ入力</label>
   </div>
-
   <div class="row">
     <label>通知距離: <span id="thv">100m</span></label>
     <input id="th" type="range" min="20" max="300" step="10" value="100" />
   </div>
-
   <div class="row">
     <button id="export">エクスポート</button>
     <span id="stat" class="small"></span>
   </div>
-
   <div class="row">
     <button id="tts">音声テスト</button>
   </div>
@@ -93,124 +61,58 @@
 
 <button id="fab-recenter">📍</button>
 
-<script src="leaflet.js?v=250840"></script>
-
-<!-- 画像ファイル不要のSVGピン（「？」対策） -->
+<script src="leaflet.js?v=250841"></script>
 <script>
-(function(){
-  const svg=encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#2A7FFF"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);
-  const dataUrl=`data:image/svg+xml;charset=UTF-8,${svg}`;
-  const LocalPin=L.Icon.extend({options:{iconUrl:dataUrl,iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30],shadowUrl:null}});
-  L.Marker.prototype.options.icon=new LocalPin();
-})();
+(function(){ const svg=encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#2A7FFF"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`); const dataUrl=`data:image/svg+xml;charset=UTF-8,${svg}`; const LocalPin=L.Icon.extend({options:{iconUrl:dataUrl,iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30],shadowUrl:null}}); L.Marker.prototype.options.icon=new LocalPin();})();
 </script>
-
-<script src="jszip.min.js?v=250840"></script>
-<script src="togeojson.umd.js?v=250840"></script>
+<script src="jszip.min.js?v=250841"></script>
+<script src="togeojson.umd.js?v=250841"></script>
 
 <script>
-/* ====== Map ====== */
+/* Map */
 const map=L.map('map').setView([35,135],14);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 const me=L.circleMarker([35,135],{radius:7,color:'#0ea5e9',fillOpacity:0.7,weight:3}).addTo(map);
-/* 軌跡は赤 */
 const trackLine=L.polyline([], {color:'#ef4444',weight:5}).addTo(map);
 const checkpointLayer=L.layerGroup().addTo(map);
 
-/* ====== State ====== */
+/* State */
 let lastLatLng=null, tracking=false, watchId=null, pulseTimer=null;
 let notifyMeters=100;
-let routeLayer=null;
-const routePointLayers=[];
-/* 「解禁待ち」は廃止 → 開始直後から判定 */
-let trackingStartedAt=0;
+let routeLayer=null; const routePointLayers=[];
+let startupSweepTimer=null;
 
-/* ====== DOM ====== */
-const $file=document.getElementById('file');
-const $clear=document.getElementById('clear');
-const $fname=document.getElementById('fname');
-const $track=document.getElementById('track');
-const $stop=document.getElementById('stop');
-const $rec=document.getElementById('recenter');
-const $fab=document.getElementById('fab-recenter');
-const $chk=document.getElementById('checkpoint');
-const $memo=document.getElementById('withMemo');
-const $th=document.getElementById('th');
-const $thv=document.getElementById('thv');
-const $stat=document.getElementById('stat');
-const $recBadge=document.getElementById('recBadge');
-const $toast=document.getElementById('toast');
+/* DOM */
+const $file=document.getElementById('file'), $clear=document.getElementById('clear'), $fname=document.getElementById('fname');
+const $track=document.getElementById('track'), $stop=document.getElementById('stop');
+const $rec=document.getElementById('recenter'), $fab=document.getElementById('fab-recenter');
+const $chk=document.getElementById('checkpoint'), $memo=document.getElementById('withMemo');
+const $th=document.getElementById('th'), $thv=document.getElementById('thv'), $stat=document.getElementById('stat');
+const $recBadge=document.getElementById('recBadge'), $toast=document.getElementById('toast');
 
-/* ====== 音声（iOS強化）＋ビープ ====== */
+/* TTS + beep */
 let voiceReady=false, audioCtx=null;
 function getCtx(){ return audioCtx ||= new (window.AudioContext||window.webkitAudioContext)(); }
 function ensureAudio(){ try{ getCtx().resume(); }catch(_){} }
 function preloadVoices(){ try{ speechSynthesis.getVoices(); }catch(_){} }
 window.speechSynthesis?.addEventListener?.('voiceschanged', preloadVoices); preloadVoices();
-
-/* 解錠のみ */
-function unlockTTS(){
-  try{
-    ensureAudio();
-    const ctx=getCtx(), osc=ctx.createOscillator(), gain=ctx.createGain();
-    gain.gain.value=0.05; osc.connect(gain).connect(ctx.destination);
-    const t=ctx.currentTime; osc.start(t); osc.stop(t+0.08);
-    voiceReady=true;
-  }catch(e){ console.warn(e); }
-}
-function speak(text){
-  if(!voiceReady){ unlockTTS(); }
-  ensureAudio();
-  try{
-    const u=new SpeechSynthesisUtterance(String(text));
-    u.lang='ja-JP'; u.rate=0.85; u.pitch=1; u.volume=1;
-    const vs=speechSynthesis.getVoices?.()||[];
-    const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja')); if(ja) u.voice=ja;
-    const speakNow=()=>speechSynthesis.speak(u);
-    if(speechSynthesis.speaking||speechSynthesis.pending){ speechSynthesis.cancel(); setTimeout(speakNow,50); } else { speakNow(); }
-  }catch(e){ console.warn(e); }
-}
-/* 発話が無音でも気づける短いビープ */
-function beep(ms=160, freq=880){
-  try{
-    ensureAudio();
-    const ctx=getCtx(), o=ctx.createOscillator(), g=ctx.createGain();
-    g.gain.setValueAtTime(0.08, ctx.currentTime);
-    o.frequency.value=freq; o.type='sine';
-    o.connect(g).connect(ctx.destination);
-    o.start(); o.stop(ctx.currentTime + ms/1000);
-  }catch(e){}
-}
-/* 画面トースト */
-let toastTimer=null;
-function toast(msg){
-  $toast.textContent=msg; $toast.style.display='block';
-  clearTimeout(toastTimer); toastTimer=setTimeout(()=>{$toast.style.display='none';}, 2200);
-}
-
+function unlockTTS(){ try{ ensureAudio(); const ctx=getCtx(), o=ctx.createOscillator(), g=ctx.createGain(); g.gain.value=0.05; o.connect(g).connect(ctx.destination); const t=ctx.currentTime; o.start(t); o.stop(t+0.08); voiceReady=true; }catch(e){} }
+function speak(t){ if(!voiceReady) unlockTTS(); ensureAudio(); try{ const u=new SpeechSynthesisUtterance(String(t)); u.lang='ja-JP'; u.rate=0.85; const vs=speechSynthesis.getVoices?.()||[]; const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja')); if(ja) u.voice=ja; const run=()=>speechSynthesis.speak(u); if(speechSynthesis.speaking||speechSynthesis.pending){ speechSynthesis.cancel(); setTimeout(run,50);} else run(); }catch(e){} }
+function beep(ms=140,f=880){ try{ ensureAudio(); const ctx=getCtx(), o=ctx.createOscillator(), g=ctx.createGain(); g.gain.setValueAtTime(0.08,ctx.currentTime); o.frequency.value=f; o.connect(g).connect(ctx.destination); o.start(); o.stop(ctx.currentTime+ms/1000);}catch(e){} }
+let toastTimer=null; function toast(msg){ $toast.textContent=msg; $toast.style.display='block'; clearTimeout(toastTimer); toastTimer=setTimeout(()=>{$toast.style.display='none';},2200); }
 function isStartName(name){ const n=(name||'').trim(); return /^start$/i.test(n)||/^スタート$/i.test(n); }
 
-/* ====== ルート読込（KML/KMZ） ====== */
+/* File load */
 function clearRoute(){ if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; } routePointLayers.length=0; $fname.textContent='（未選択）'; }
 $clear.onclick=clearRoute;
-
 $file.addEventListener('change', async (ev)=>{
-  const f=ev.target.files?.[0]; if(!f) return;
-  $fname.textContent=f.name;
+  const f=ev.target.files?.[0]; if(!f) return; $fname.textContent=f.name;
   try{
     let kmlText=null;
-    if(/\.kmz$/i.test(f.name)){
-      const buf=await f.arrayBuffer();
-      const zip=await JSZip.loadAsync(buf);
-      const kmlEntry=Object.values(zip.files).find(z=>z.name.toLowerCase().endsWith('.kml'));
-      if(!kmlEntry){ alert('KMZ内にKMLがありません'); return; }
-      kmlText=await kmlEntry.async('string');
-    }else{
-      kmlText=await f.text();
-    }
+    if(/\.kmz$/i.test(f.name)){ const buf=await f.arrayBuffer(); const zip=await JSZip.loadAsync(buf); const ent=Object.values(zip.files).find(z=>z.name.toLowerCase().endsWith('.kml')); if(!ent){ alert('KMZ内にKMLがありません'); return; } kmlText=await ent.async('string'); }
+    else { kmlText=await f.text(); }
     const dom=new DOMParser().parseFromString(kmlText,'text/xml');
     const gj=toGeoJSON.kml(dom);
-
     if(routeLayer) map.removeLayer(routeLayer);
     routeLayer=L.geoJSON(gj,{
       style:{color:'#1d4ed8',weight:4},
@@ -218,45 +120,32 @@ $file.addEventListener('change', async (ev)=>{
         const name=feat.properties?.name||feat.properties?.Name||'ポイント';
         const m=L.marker(latlng).bindPopup(name);
         m.feature={properties:{name}}; m._announced=false; m._lastDist=Infinity;
-        routePointLayers.push(m);
-        return m;
+        routePointLayers.push(m); return m;
       }
     }).addTo(map);
-
     try{ map.fitBounds(routeLayer.getBounds(),{padding:[20,20]}); }catch(_){}
-    // 追跡中なら現在地ですぐチェック
-    if (tracking && lastLatLng) checkNearOnce(L.latLng(lastLatLng));
-  }catch(e){ console.warn(e); alert('ファイル読込に失敗：'+(e?.message||e)); }
+    if(tracking && lastLatLng) checkNearOnce(L.latLng(lastLatLng)); // 追跡中は即チェック
+  }catch(e){ alert('ファイル読込に失敗：'+(e?.message||e)); }
 });
 
-/* ====== 読み上げ：半径内なら必ず一度だけ ====== */
+/* 読み上げ：半径内なら一度だけ */
 function checkNearOnce(here){
   const list=[...routePointLayers, ...Object.values(checkpointLayer._layers||{})];
   for(const layer of list){
     if(!layer?.getLatLng || layer._announced) continue;
     const dist=map.distance(here, layer.getLatLng());
-    layer._lastDist = dist;
-
-    const p=layer.feature?.properties||{};
-    const name=(p.name||'').trim();
-    const memo=(p.memo||'').trim();
-
-    // START/スタートは誤発話になることが多いのでスキップ
-    if (isStartName(name)) continue;
-
-    if(dist <= notifyMeters){
-      const parts=[]; if(name) parts.push(name); if(memo) parts.push(memo);
-      const text = parts.join('。') || 'チェックポイント';
-      // UI通知 ＋ 音（TTS + ビープ）
-      toast(text);
-      beep(140, 880);
-      speak(text);
-      layer._announced = true;
+    layer._lastDist=dist;
+    const p=layer.feature?.properties||{}, name=(p.name||'').trim(), memo=(p.memo||'').trim();
+    if(isStartName(name)) continue; // スタートという名の点は除外
+    if(dist<=notifyMeters){
+      const text=(name||memo)?[name,memo].filter(Boolean).join('。'):'チェックポイント';
+      toast(text); beep(140,880); speak(text);
+      layer._announced=true;
     }
   }
 }
 
-/* ====== 操作 ====== */
+/* UI */
 document.getElementById('tts').onclick=()=>{ unlockTTS(); setTimeout(()=>{ toast('テストです'); beep(); speak('テストです'); },120); };
 $th.oninput=()=>{ notifyMeters=+$th.value; $thv.textContent=`${notifyMeters}m`; };
 
@@ -265,37 +154,45 @@ $track.onclick=()=>{
   unlockTTS();
   setTimeout(()=>{ toast('評価を開始します'); beep(120,880); speak('評価を開始します'); },120);
 
-  tracking=true;
-  $track.disabled=true; $stop.disabled=false;
-  $recBadge.style.display='flex'; startPulse();
-  trackLine.setLatLngs([]);
-  checkpointLayer.clearLayers();
+  tracking=true; $track.disabled=true; $stop.disabled=false; $recBadge.style.display='flex'; startPulse();
+  trackLine.setLatLngs([]); checkpointLayer.clearLayers();
 
-  trackingStartedAt=Date.now();
+  // 追跡開始時点の現在地で即チェック（取得済みなら）
+  if(lastLatLng) checkNearOnce(L.latLng(lastLatLng));
 
-  // 既存ポイントの状態をリセット
-  routePointLayers.forEach(l=>{ l._announced=false; l._lastDist=Infinity; });
-  Object.values(checkpointLayer._layers||{}).forEach(l=>{ l._announced=false; l._lastDist=Infinity; });
+  // GPS を即時トリガ（許可プロンプトを出しつつ、その地点も判定）
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(pos=>{
+      lastLatLng=[pos.coords.latitude,pos.coords.longitude];
+      me.setLatLng(lastLatLng);
+      map.setView(lastLatLng,16);
+      checkNearOnce(L.latLng(lastLatLng));  // ★ここで一発チェック
+    },()=>{}, {enableHighAccuracy:true,timeout:8000});
+  }
 
+  // 開始直後 20 秒は 2 秒おきに“その場チェック”を追加実行（GPS初期化遅延対策）
+  let sweepCount=0; clearInterval(startupSweepTimer);
+  startupSweepTimer=setInterval(()=>{
+    if(!tracking) { clearInterval(startupSweepTimer); return; }
+    if(lastLatLng){ checkNearOnce(L.latLng(lastLatLng)); }
+    if(++sweepCount>=10){ clearInterval(startupSweepTimer); } // 2s*10=20s
+  },2000);
+
+  // 通常の追跡
   watchId=navigator.geolocation.watchPosition(pos=>{
     lastLatLng=[pos.coords.latitude,pos.coords.longitude];
-    me.setLatLng(lastLatLng);
-    trackLine.addLatLng(lastLatLng);
-
-    const here=L.latLng(lastLatLng);
-    // ★ 毎回：半径内なら必ず一度だけチェック
-    checkNearOnce(here);
-  },err=>{
-    $stat.textContent=`位置エラー: ${err.message}`;
-  },{enableHighAccuracy:true,maximumAge:1000,timeout:10000});
+    me.setLatLng(lastLatLng); trackLine.addLatLng(lastLatLng);
+    checkNearOnce(L.latLng(lastLatLng)); // ★毎回チェック
+  }, err=>{ $stat.textContent=`位置エラー: ${err.message}`; },
+  {enableHighAccuracy:true,maximumAge:1000,timeout:10000});
 };
 
 $stop.onclick=()=>{
   if(!tracking) return;
   tracking=false;
   if(watchId){ navigator.geolocation.clearWatch(watchId); watchId=null; }
-  $track.disabled=false; $stop.disabled=true;
-  $recBadge.style.display='none'; stopPulse();
+  clearInterval(startupSweepTimer);
+  $track.disabled=false; $stop.disabled=true; $recBadge.style.display='none'; stopPulse();
 };
 
 $chk.onclick=()=>{
@@ -305,18 +202,17 @@ $chk.onclick=()=>{
   m.feature={properties:{name:'チェックポイント', memo:memo||''}};
   m.bindPopup(memo?`<b>CP</b><br>${memo}`:"<b>CP</b>");
   m._announced=false; m._lastDist=Infinity;
-  // 追加直後、もし今すでに半径内なら読む
-  checkNearOnce(L.latLng(lastLatLng));
+  checkNearOnce(L.latLng(lastLatLng)); // 追加直後に半径内なら読む
 };
 
 $rec.onclick=()=>{ if(lastLatLng) map.setView(lastLatLng,16); };
 $fab.onclick=()=>$rec.click();
 
-/* ====== 演出 ====== */
+/* 演出 */
 function startPulse(){ let up=true; pulseTimer=setInterval(()=>{ let r=me.options.radius; r=up?Math.min(11,r+0.5):Math.max(7,r-0.5); me.setStyle({radius:r}); if(r>=11)up=false; if(r<=7)up=true; },80); }
 function stopPulse(){ clearInterval(pulseTimer); pulseTimer=null; me.setStyle({radius:7}); }
 
-/* 初回位置（許可を誘発） */
+/* 初回位置（地図を寄せる） */
 if(navigator.geolocation){
   navigator.geolocation.getCurrentPosition(pos=>{
     lastLatLng=[pos.coords.latitude,pos.coords.longitude];
@@ -324,7 +220,7 @@ if(navigator.geolocation){
   },()=>{});
 }
 
-/* ====== エクスポート（GeoJSON） ====== */
+/* Export */
 document.getElementById('export').onclick=()=>{
   const gj={type:'FeatureCollection',features:[
     {type:'Feature',properties:{kind:'track'},geometry:{type:'LineString',coordinates:trackLine.getLatLngs().map(ll=>[ll.lng,ll.lat])}}
