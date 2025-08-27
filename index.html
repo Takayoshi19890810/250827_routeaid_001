@@ -47,8 +47,9 @@
     <span class="pill stat">距離: <span id="dist">0.00</span> km</span>
     $1
 
-    <span id="runStatus" class="status-pill status-idle" title="追跡の状態">
-      <span class="dot"></span>
+    $1
+
+    <span class=\"pill stat\">時間: <span id=\"elapsed\">00:00:00</span></span>
       <span id="runStatusText">待機中</span>
     </span>
 
@@ -68,6 +69,8 @@
 <script>
   // ====== 追跡・描画のコア状態 ======
   let map, currentMarker, trackLine;
+  let startTime = null;
+  let elapsedTimer = null;
   let watchId = null;
   let points = []; // {lat, lng, t}
   let distMeters = 0;
@@ -134,8 +137,14 @@
 
     watchId = navigator.geolocation.watchPosition(onPos, onErr, options);
 
+    startTime = new Date();
+    if (elapsedTimer) clearInterval(elapsedTimer);
+    elapsedTimer = setInterval(updateElapsed, 1000);
+
     setButtons({ running: true, paused: false });
     toast('評価を開始します（追跡開始）');
+    setRunStatus('running');
+    try { if (navigator.vibrate) navigator.vibrate(50); } catch(_){}
     setRunStatus('running');
     try { if (navigator.vibrate) navigator.vibrate(50); } catch(_){}
   }
@@ -176,6 +185,7 @@
     if (watchId != null) {
       navigator.geolocation.clearWatch(watchId);
       watchId = null;
+      if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer=null; }
       setButtons({ running: false, paused: true });
       toast('一時停止');
       setRunStatus('paused');
@@ -184,7 +194,11 @@
 
   function resumeTracking() {
     if (watchId == null) {
-      startTracking(); // 位置監視を再開（配列は継続利用）
+      const options = { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 };
+      watchId = navigator.geolocation.watchPosition(onPos, onErr, options);
+      if (!startTime) startTime=new Date();
+      if (elapsedTimer) clearInterval(elapsedTimer);
+      elapsedTimer=setInterval(updateElapsed,1000);
       setButtons({ running: true, paused: false, resume: true });
       toast('追跡を再開');
       setRunStatus('running');
@@ -196,6 +210,7 @@
       navigator.geolocation.clearWatch(watchId);
       watchId = null;
     }
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer=null; }
     setButtons({ running: false, paused: false, stopped: true });
     toast('停止しました。保存できます');
     setRunStatus('stopped');
@@ -335,8 +350,19 @@
     else { pill.classList.add('status-idle'); text.textContent='待機中'; document.title='Route Aid – 追跡＆軌跡保存'; }
   }
 
+  function updateElapsed(){
+    if (!startTime) return;
+    const now=new Date();
+    const sec=Math.floor((now-startTime)/1000);
+    const h=Math.floor(sec/3600).toString().padStart(2,'0');
+    const m=Math.floor((sec%3600)/60).toString().padStart(2,'0');
+    const s=(sec%60).toString().padStart(2,'0');
+    document.getElementById('elapsed').textContent=`${h}:${m}:${s}`;
+  }
+
   // 起動
   init();
+  setRunStatus('idle');
   setRunStatus('idle');
 </script>
 </body>
