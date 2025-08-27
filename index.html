@@ -2,462 +2,171 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>実車評価支援ツール</title>
-<link rel="stylesheet" href="leaflet.css" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>My Maps KMZ 読み上げ（個別スタイルのみ）＋ルート表示</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-  html,body,#map{height:100%;margin:0}
-  #map{background:#f2f2f2; transform-origin:center center;} /* 回転の基点 */
-  #panel{
-    position:absolute;left:10px;top:10px;z-index:1000;
-    background:#fff;padding:10px 12px;border-radius:14px;
-    box-shadow:0 6px 24px rgba(0,0,0,.18);
-    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;
-    min-width:300px;max-width:min(94vw,520px)
-  }
-  #panel h1{margin:0 0 8px;font-size:14px;font-weight:700}
-  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}
-  .row > label{white-space:nowrap}
-  .small{font-size:11px;color:#555}
-  button{padding:6px 10px;border-radius:10px;cursor:pointer;border:1px solid #ddd;background:#fff}
-  #track{background:#16a34a;color:#fff;border-color:#16a34a}
-  #stop{background:#ef4444;color:#fff;border-color:#ef4444}
-  #recenter{background:#0ea5e9;color:#fff;border-color:#0ea5e9}
-  #checkpoint{background:#f59e0b;color:#fff;border-color:#f59e0b}
-  #export{background:#6366f1;color:#fff;border-color:#6366f1}
-  #fab-recenter{
-    position:absolute;right:14px;bottom:14px;z-index:1000;
-    width:50px;height:50px;border-radius:50%;
-    display:grid;place-items:center;background:#0ea5e9;color:#fff;
-    font-size:20px;border:none;box-shadow:0 6px 24px rgba(0,0,0,.18)
-  }
-  #recBadge{
-    position:absolute;right:12px;top:12px;z-index:1001;display:none;align-items:center;gap:6px;
-    background:rgba(239,68,68,.95);color:#fff;padding:6px 10px;border-radius:9999px;
-    box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:12px
-  }
-  .dot{width:10px;height:10px;border-radius:50%;background:#fff;animation:blink 1s infinite}
-  @keyframes blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
-  #toast{
-    position:absolute;left:50%;bottom:78px;transform:translateX(-50%);
-    z-index:1002;display:none;max-width:min(92vw,520px);
-    background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:12px;
-    box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px
-  }
-  /* コンパス（Course Up のときに方位を示す） */
-  #compass{
-    position:absolute;right:14px;top:74px;z-index:1000;
-    width:44px;height:44px;border-radius:50%;background:#fff;
-    box-shadow:0 4px 12px rgba(0,0,0,.2); display:grid;place-items:center;
-    font-size:12px;color:#111;
-  }
-  #compassArrow{width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:14px solid #ef4444;transform-origin:50% 90%}
+  html, body, #map { height: 100%; margin: 0; }
+  .toolbar{position:absolute;z-index:1000;left:8px;top:8px;background:#fff;border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,.12);padding:10px;font:14px/1.4 system-ui;}
+  .toolbar label{display:block;margin-bottom:6px}
 </style>
 </head>
 <body>
+<div class="toolbar">
+  <label>KMZを選択： <input type="file" id="kmzInput" accept=".kmz"></label>
+  <label>読み上げ半径（m）： <input type="number" id="radius" value="120" min="10" step="10" style="width:6em"></label>
+  <button id="startBtn">追跡開始</button>
+  <button id="stopBtn" disabled>追跡終了</button>
+  <div id="status">GPS未取得</div>
+</div>
 <div id="map"></div>
-<div id="recBadge"><span class="dot"></span>追跡中</div>
-<div id="toast"></div>
-<div id="compass" style="display:none">
-  <div id="compassArrow"></div>
-  <div style="font-size:10px;margin-top:2px">N</div>
-</div>
 
-<div id="panel">
-  <h1>実車評価支援ツール</h1>
-
-  <div class="row">
-    <input id="file" type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" />
-    <button id="clear">クリア</button>
-    <span id="fname" class="small">（未選択）</span>
-  </div>
-
-  <div class="row">
-    <button id="track">追跡開始</button>
-    <button id="stop" disabled>停止</button>
-    <button id="recenter">現在地へ</button>
-  </div>
-
-  <div class="row">
-    <button id="checkpoint">チェックポイント</button>
-    <label><input type="checkbox" id="withMemo" />メモ入力</label>
-  </div>
-
-  <div class="row">
-    <label>通知距離: <span id="thv">100m</span></label>
-    <input id="th" type="range" min="20" max="300" step="10" value="100" />
-  </div>
-
-  <div class="row">
-    <label><input type="checkbox" id="keepCentered" />自車を常に中心</label>
-    <span class="small">（ONで追跡中は自車を中央に固定）</span>
-  </div>
-
-  <div class="row" style="gap:14px">
-    <label>地図の向き:</label>
-    <label><input type="radio" name="orient" value="north" checked /> 北を上</label>
-    <label><input type="radio" name="orient" value="course" /> 進行方向を上</label>
-  </div>
-
-  <div class="row">
-    <button id="export">エクスポート</button>
-    <span id="stat" class="small"></span>
-  </div>
-
-  <div class="row">
-    <button id="tts">音声テスト</button>
-    <button id="keepAwake">画面スリープ防止: OFF</button>
-  </div>
-</div>
-
-<button id="fab-recenter">📍</button>
-
-<script src="leaflet.js"></script>
-
-<!-- ピン：青=意味のあるKMLポイント / 灰=ルート汎用ピン / 橙=手動CP -->
-<script>
-(function(){
-  function svg(color){return encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36">
-      <path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="${color}"/>
-      <circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`
-  );}
-  const Blue   = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${svg('#2A7FFF')}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
-  const Orange = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${svg('#F59E0B')}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
-  const Gray   = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${svg('#9CA3AF')}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
-  // 既定は青（意味のあるポイント）
-  L.Marker.prototype.options.icon = new Blue();
-  window.__BlueIcon   = new Blue();
-  window.__OrangeIcon = new Orange();
-  window.__GrayIcon   = new Gray();
-})();
-</script>
-
-<script src="jszip.min.js"></script>
-<script src="togeojson.umd.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tmcw/togeojson@5.8.1/dist/togeojson.umd.js"></script>
 
 <script>
-/* ====== 地図 ====== */
-const map=L.map('map').setView([35,135],14);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
-const me=L.circleMarker([35,135],{radius:7,color:'#0ea5e9',fillOpacity:0.7,weight:3}).addTo(map);
-/* 軌跡は赤 */
-const trackLine=L.polyline([], {color:'#ef4444',weight:5}).addTo(map);
-const checkpointLayer=L.layerGroup().addTo(map);
+// ====== 地図セットアップ ======
+const map = L.map('map').setView([35.681, 139.767], 12);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OSM'}).addTo(map);
 
-/* ====== 状態・DOM ====== */
-let lastLatLng=null, prevLatLng=null, tracking=false, watchId=null, pulseTimer=null, startupSweepTimer=null;
-let notifyMeters=100;
-let routeLayer=null;
-const routePointLayers=[];        // 読み上げ対象ポイントのみ
-const genericPointLayers=[];      // ルート汎用ピン（表示のみ・読み上げ対象外）
+let routeLayer = L.geoJSON(null, { style:{color:'#0a84ff', weight:4, opacity:0.9} }).addTo(map);
+let markerLayer = L.geoJSON(null, {
+  pointToLayer: (feat, latlng) => L.circleMarker(latlng, {radius:7, color:'#e11d48', fillColor:'#fb7185', fillOpacity:0.9, weight:2})
+}).addTo(map);
 
-const $file=document.getElementById('file'),$clear=document.getElementById('clear'),$fname=document.getElementById('fname');
-const $track=document.getElementById('track'),$stop=document.getElementById('stop');
-const $rec=document.getElementById('recenter'),$fab=document.getElementById('fab-recenter');
-const $chk=document.getElementById('checkpoint'),$memo=document.getElementById('withMemo');
-const $th=document.getElementById('th'),$thv=document.getElementById('thv'),$stat=document.getElementById('stat');
-const $recBadge=document.getElementById('recBadge'),$toast=document.getElementById('toast');
-const $keepAwake=document.getElementById('keepAwake');
-const $keepCentered=document.getElementById('keepCentered');
-const $compass=document.getElementById('compass'); const $compassArrow=document.getElementById('compassArrow');
-let orientationMode='north'; // 'north' | 'course'
-document.querySelectorAll('input[name=orient]').forEach(r=>{
-  r.addEventListener('change',()=>{
-    orientationMode=r.value;
-    if(orientationMode==='north'){
-      rotateMap(0); $compass.style.display='none';
-    }else{
-      $compass.style.display='grid';
+let watchId = null;
+let alreadySpokenIds = new Set();
+let currentPosMarker = null;
+
+// ====== KMZ読込：JSZipで解凍→doc.kml→toGeoJSON ======
+async function loadKmz(file) {
+  const zip = await JSZip.loadAsync(file);
+  // My MapsのKMZは通常 doc.kml を含む
+  const kmlFile = zip.file(/doc\.kml$/i)[0] || zip.file(/\.kml$/i)[0];
+  if (!kmlFile) { alert("KMZ内にKMLが見つかりませんでした"); return; }
+  const kmlText = await kmlFile.async('text');
+
+  // KML→GeoJSON
+  const kmlDom = new DOMParser().parseFromString(kmlText, 'text/xml');
+  const gj = toGeoJSON.kml(kmlDom);
+
+  // フォルダ（レイヤ）名で振り分け：My Mapsはレイヤ=Folderとして出力
+  // 想定：レイヤ名に「ルート」など明示。なければジオメトリタイプで判定。
+  const routeFC = { type:'FeatureCollection', features:[] };
+  const pointFC = { type:'FeatureCollection', features:[] };
+
+  for (const f of gj.features) {
+    const name = (f.properties && (f.properties.name || f.properties._folder)) || '';
+    const geom = f.geometry && f.geometry.type;
+    const inRouteFolder =
+      /route|ルート|道順|経路/i.test(name) ||
+      /route|ルート|道順|経路/i.test(f.properties?._folder || '');
+
+    if (geom === 'LineString' || geom === 'MultiLineString' || inRouteFolder) {
+      // ルート → 線だけ表示（Pointは捨てる）
+      if (geom === 'LineString' || geom === 'MultiLineString') routeFC.features.push(f);
+      // ルート用のPointは何もしない（非表示＆非読み上げ）
+    } else if (geom === 'Point') {
+      // 個別スタイルのマーカー（=ポイント）
+      // ただし、レイヤ名が「ルート」系なら除外
+      const folder = (f.properties && f.properties._folder) || '';
+      if (!/route|ルート|道順|経路/i.test(folder)) pointFC.features.push(f);
     }
-  });
-});
+  }
 
-/* ====== 音声（iOS安定化）＋キュー（onend連結） ====== */
-let voiceReady=false, audioCtx=null;
-function getCtx(){ return audioCtx ||= new (window.AudioContext||window.webkitAudioContext)(); }
-function ensureAudio(){ try{ getCtx().resume(); }catch(_){} }
-function unlockTTS(){ try{ ensureAudio(); const c=getCtx(),o=c.createOscillator(),g=c.createGain(); g.gain.value=0.05; o.connect(g).connect(c.destination); const t=c.currentTime; o.start(t); o.stop(t+0.08); voiceReady=true; }catch(_){ } }
-function speakQueued(text, next){
-  if(!voiceReady) unlockTTS(); ensureAudio();
-  try{
-    const u=new SpeechSynthesisUtterance(String(text));
-    u.lang='ja-JP'; u.rate=0.85; u.pitch=1; u.volume=1;
-    const vs=speechSynthesis.getVoices?.()||[];
-    const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja')); if(ja) u.voice=ja;
-    let settled=false; const proceed=()=>{ if(settled) return; settled=true; next?.(); };
-    const timeoutMs = Math.max(1600, Math.min(8000, text.length*180));
-    const to = setTimeout(proceed, timeoutMs);
-    u.onend = ()=>{ clearTimeout(to); proceed(); };
-    u.onerror = ()=>{ clearTimeout(to); proceed(); };
-    speechSynthesis.speak(u);
-  }catch(_){ next?.(); }
+  routeLayer.clearLayers().addData(routeFC);
+  markerLayer.clearLayers().addData(pointFC);
+
+  // フィット
+  const group = L.featureGroup([routeLayer, markerLayer]);
+  if (group.getLayers().length) map.fitBounds(group.getBounds(), {padding:[40,40]});
 }
-function beep(ms=140,f=880){ try{ ensureAudio(); const c=getCtx(),o=c.createOscillator(),g=c.createGain(); g.gain.setValueAtTime(0.08,c.currentTime); o.frequency.value=f; o.connect(g).connect(c.destination); o.start(); o.stop(c.currentTime+ms/1000); }catch(_){ } }
-let toastTimer=null; function toast(msg){ $toast.textContent=msg; $toast.style.display='block'; clearTimeout(toastTimer); toastTimer=setTimeout(()=>{$toast.style.display='none';},2200); }
-let q=[]; let playing=false;
-function enqueueSpeech(items){ if(!items||!items.length) return; q.push(...items); if(!playing) playNext(); }
-function playNext(){ if(!q.length){ playing=false; return; } playing=true; const text=q.shift(); toast(text); beep(130,880); speakQueued(text, ()=>{ setTimeout(playNext, 120); }); }
 
-/* ====== Wake Lock（画面スリープ防止） ====== */
-let wakeLock = null;
-async function enableWakeLock(){
-  try{
-    if ('wakeLock' in navigator) {
-      wakeLock = await navigator.wakeLock.request('screen');
-      $keepAwake.textContent = '画面スリープ防止: ON';
-      wakeLock.addEventListener('release', ()=> { $keepAwake.textContent = '画面スリープ防止: OFF'; });
+// ====== 音声読み上げ ======
+function speak(text) {
+  if (!text) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'ja-JP';
+  u.rate = 0.95; // 少しゆっくり
+  speechSynthesis.cancel(); // 直前の発話をキャンセル（重複防止）
+  speechSynthesis.speak(u);
+}
+
+// ====== 追跡（半径内で読み上げ） ======
+function startTracking() {
+  if (!navigator.geolocation) { alert('この端末は位置情報に対応していません'); return; }
+  const radiusM = Number(document.getElementById('radius').value) || 120;
+
+  alreadySpokenIds.clear();
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  speak('評価を開始します');
+
+  watchId = navigator.geolocation.watchPosition(pos => {
+    const { latitude, longitude, accuracy } = pos.coords;
+    document.getElementById('status').textContent =
+      `GPS取得: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}（±${Math.round(accuracy)}m）`;
+
+    const latlng = [latitude, longitude];
+    if (!currentPosMarker) {
+      currentPosMarker = L.circleMarker(latlng, {radius:6, color:'#111', fillColor:'#333', fillOpacity:0.9}).addTo(map);
     } else {
-      alert('端末が Wake Lock に未対応です。iPhone側の自動ロックを「しない」にしてください。');
+      currentPosMarker.setLatLng(latlng);
     }
-  }catch(e){
-    console.warn('WakeLock error:', e);
-    alert('Wake Lock を取得できませんでした。iPhone側の自動ロックを「しない」にしてください。');
-  }
-}
-async function disableWakeLock(){ try{ await wakeLock?.release(); }catch(_){}
-  wakeLock = null; $keepAwake.textContent = '画面スリープ防止: OFF'; }
-document.addEventListener('visibilitychange', ()=> { if (document.visibilityState === 'visible' && wakeLock) enableWakeLock(); });
-$keepAwake.onclick = ()=> { if (wakeLock) disableWakeLock(); else enableWakeLock(); };
 
-/* ====== メモ抽出（MyMapsのdescription/ExtendedData等） ====== */
-function stripHtml(x){ if (!x) return ''; const div=document.createElement('div'); div.innerHTML=String(x); return (div.textContent||div.innerText||'').replace(/\s+/g,' ').trim(); }
-function firstNonEmpty(arr){ for(const v of arr){ if(v!=null && String(v).trim()!=='') return v; } return ''; }
-function extractMemo(props){
-  if(!props || typeof props!=='object') return '';
-  const direct = firstNonEmpty([props.memo, props.Memo, props.description, props.Description, props.snippet, props.Snippet, props.note, props.Note, props['メモ'], props['説明'], props['概要']]);
-  if (direct) return stripHtml(direct);
-  const ed = props.ExtendedData || props.extendedData || props.extendeddata || {};
-  try{ const arr = Array.isArray(ed.Data)? ed.Data : Array.isArray(ed.data)? ed.data : null;
-    if (arr) for(const item of arr){ const k=item?.name||item?.Name||''; const v=item?.value||item?.Value||''; if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v); } }catch(_){}
-  try{ const sds = ed.SchemaData || ed.schemadata || [];
-    for(const s of (Array.isArray(sds)?sds:[sds])){ const sims = s?.SimpleData || s?.simpledata || [];
-      for(const sd of (Array.isArray(sims)?sims:[sims])){ const k=sd?.name||sd?.Name||''; const v=sd?._text||sd?.text||sd?.value||''; if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v); } } }catch(_){}
-  try{ for(const k of Object.keys(ed)){ const v=ed[k]; if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v); } }catch(_){}
-  const htmlish = firstNonEmpty([props.descriptionHtml, props.balloonText, props.BalloonText]); if (htmlish) return stripHtml(htmlish);
-  return '';
-}
+    // 近接判定：markerLayer内の各ポイントへ距離計算
+    markerLayer.eachLayer(layer => {
+      const f = layer.feature || {};
+      const id = f.id || (f.properties && (f.properties.name + '@' + JSON.stringify(f.geometry.coordinates))) || layer._leaflet_id;
+      if (alreadySpokenIds.has(id)) return;
 
-/* ====== KML/KMZ 読み込み ====== */
-function clearRoute(){ if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; } routePointLayers.length=0; genericPointLayers.length=0; $fname.textContent='（未選択）'; }
-document.getElementById('clear').onclick=clearRoute;
-
-$file.addEventListener('change', async (ev)=>{
-  const f=ev.target.files?.[0]; if(!f) return; $fname.textContent=f.name;
-  try{
-    let kmlText=null;
-    if(/\.kmz$/i.test(f.name)){
-      const buf=await f.arrayBuffer();
-      const zip=await JSZip.loadAsync(buf);
-      const ent=Object.values(zip.files).find(z=>z.name.toLowerCase().endsWith('.kml'));
-      if(!ent){ alert('KMZ内にKMLがありません'); return; }
-      kmlText=await ent.async('string');
-    }else{
-      kmlText=await f.text();
-    }
-    const dom=new DOMParser().parseFromString(kmlText,'text/xml');
-    const gj=toGeoJSON.kml(dom);
-
-    if(routeLayer) map.removeLayer(routeLayer);
-
-    routeLayer=L.geoJSON(gj,{
-      style:{color:'#1d4ed8',weight:4},
-
-      /* Pointを分類：採用（青）/ 汎用（灰） */
-      pointToLayer:(feat,latlng)=>{
-        const props = feat.properties || {};
-        const name  = (props.name || props.Name || '').trim();
-        const memo  = extractMemo(props).trim();
-        const generic = /^(point|ポイント|経由地|waypoint|via)(?:[\s\-_\d]*)$/i.test(name);
-
-        const isMeaningful = !!( memo || (name && !generic) );
-        const icon = isMeaningful ? window.__BlueIcon : window.__GrayIcon;
-        const popup = (name||memo)? [name,memo].filter(Boolean).join('<br>') : (generic?'ルート用ピン':'ポイント');
-
-        const m=L.marker(latlng,{icon}).bindPopup(popup);
-        m.feature={properties:{name, memo}};
-        m._announced=false; m._lastDist=Infinity;
-
-        if(isMeaningful){
-          routePointLayers.push(m);   // ← 読み上げ対象
-        }else{
-          genericPointLayers.push(m); // ← 表示のみ
-        }
-        return m;
+      const pt = layer.getLatLng();
+      const d = map.distance(latlng, [pt.lat, pt.lng]); // m
+      if (d <= radiusM) {
+        // 読み上げ内容：名前＋（あれば）説明/メモ
+        const name = f.properties && f.properties.name ? f.properties.name : 'ポイント';
+        const desc = (f.properties && (f.properties.description || f.properties.snippet)) || '';
+        const text = desc ? `${name}、${desc}` : name;
+        speak(text);
+        alreadySpokenIds.add(id);
       }
-    }).addTo(map);
+    });
+  }, err => {
+    document.getElementById('status').textContent = 'GPSエラー：' + err.message;
+    // しばらくFixが入らないアラート
+    speak('GPS信号が弱いです');
+  }, { enableHighAccuracy:true, maximumAge:5000, timeout:15000 });
+}
 
-    try{ map.fitBounds(routeLayer.getBounds(),{padding:[20,20]}); }catch(_){}
-    if(tracking && lastLatLng) checkNearAndSpeak(L.latLng(lastLatLng));
-  }catch(e){ alert('ファイル読込に失敗：'+(e?.message||e)); }
+function stopTracking() {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  speak('評価を終了します');
+  document.getElementById('status').textContent = '追跡停止';
+}
+
+// ====== UIイベント ======
+document.getElementById('kmzInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  await loadKmz(file);
 });
 
-/* ====== 判定：半径内を距離順で読む（意味のあるポイント＋手動CPのみ） ====== */
-function collectNearTexts(here){
-  const list=[...routePointLayers, ...Object.values(checkpointLayer._layers||{})]; // 汎用ルートピンは含めない
-  const hits=[];
-  for(const layer of list){
-    if(!layer?.getLatLng || layer._announced) continue;
-    const dist=map.distance(here, layer.getLatLng());
-    layer._lastDist=dist;
-    const p=layer.feature?.properties||{};
-    const name=(p.name||'').trim();
-    const memo=(p.memo||'').trim();
-    if(dist<=notifyMeters){
-      const memoShort = memo.length>100 ? memo.slice(0,100)+'…' : memo;
-      const text=(name||memoShort)?[name,memoShort].filter(Boolean).join('。'):'チェックポイント';
-      hits.push({dist,text,layer});
-    }
-  }
-  if(!hits.length) return [];
-  hits.sort((a,b)=>a.dist-b.dist);
-  hits.forEach(h=>h.layer._announced=true);
-  return hits.map(h=>h.text);
-}
-function checkNearAndSpeak(here){
-  const texts=collectNearTexts(here);
-  if(texts.length) enqueueSpeech(texts);
-}
+document.getElementById('startBtn').addEventListener('click', startTracking);
+document.getElementById('stopBtn').addEventListener('click', stopTracking);
 
-/* ====== 進行方向（方位）と地図回転 ====== */
-let currentBearing=0; // 0 = 北上
-function bearingBetween(a,b){
-  const toRad=d=>d*Math.PI/180, toDeg=r=>r*180/Math.PI;
-  const lat1=toRad(a.lat), lon1=toRad(a.lng), lat2=toRad(b.lat), lon2=toRad(b.lng);
-  const y=Math.sin(lon2-lon1)*Math.cos(lat2);
-  const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(lon2-lon1);
-  let brng=(toDeg(Math.atan2(y,x))+360)%360;
-  return brng;
-}
-function rotateMap(bearingDeg){
-  // Leaflet本体は回転非対応なので、画面をCSSで回す（見た目上の回転）
-  const pane = map.getPanes().mapPane; // .leaflet-map-pane
-  pane.style.transform = `rotate(${-bearingDeg}deg)`;
-  // コンパスの矢印は北を指すので、地図に合わせて逆回転は不要。進行方向を上にするときは矢印は bearing に回す
-  $compassArrow.style.transform = `rotate(${bearingDeg}deg)`;
-}
-
-/* ====== UI操作 ====== */
-document.getElementById('tts').onclick=()=>{ unlockTTS(); enqueueSpeech(['テストです']); };
-$th.oninput=()=>{ notifyMeters=+$th.value; $thv.textContent=`${notifyMeters}m`; };
-
-$track.onclick=()=>{
-  if(tracking) return;
-  unlockTTS();
-
-  tracking=true;
-  $track.disabled=true; $stop.disabled=false;
-  $recBadge.style.display='flex'; startPulse();
-  trackLine.setLatLngs([]); checkpointLayer.clearLayers();
-
-  enqueueSpeech(['評価を開始します']);
-  if(lastLatLng){
-    const texts=collectNearTexts(L.latLng(lastLatLng));
-    if(texts.length) enqueueSpeech(texts);
-  }
-
-  if(navigator.geolocation){
-    navigator.geolocation.getCurrentPosition(pos=>{
-      const ll=[pos.coords.latitude,pos.coords.longitude];
-      prevLatLng=lastLatLng? L.latLng(lastLatLng): null;
-      lastLatLng=ll;
-      me.setLatLng(lastLatLng);
-      map.setView(lastLatLng,16);
-      checkNearAndSpeak(L.latLng(lastLatLng));
-    },()=>{}, {enableHighAccuracy:true,timeout:8000});
-  }
-
-  let sweep=0; clearInterval(startupSweepTimer);
-  startupSweepTimer=setInterval(()=>{
-    if(!tracking){ clearInterval(startupSweepTimer); return; }
-    if(lastLatLng) checkNearAndSpeak(L.latLng(lastLatLng));
-    if(++sweep>=10) clearInterval(startupSweepTimer);
-  },2000);
-
-  watchId=navigator.geolocation.watchPosition(pos=>{
-    prevLatLng = lastLatLng? L.latLng(lastLatLng): null;
-    lastLatLng=[pos.coords.latitude,pos.coords.longitude];
-    const here=L.latLng(lastLatLng);
-    me.setLatLng(here);
-    trackLine.addLatLng(here);
-
-    // 進行方向（優先：端末の heading、無ければ移動ベクトルから計算）
-    let bearing = (typeof pos.coords.heading==='number' && !isNaN(pos.coords.heading)) ? pos.coords.heading : (prevLatLng? bearingBetween(prevLatLng, here): currentBearing);
-    currentBearing = bearing;
-
-    if(orientationMode==='course'){
-      rotateMap(bearing);
-      $compass.style.display='grid';
-    }else{
-      rotateMap(0);
-      $compass.style.display='none';
-    }
-
-    if($keepCentered.checked){
-      map.setView(here, map.getZoom(), {animate:false});
-    }
-
-    checkNearAndSpeak(here);
-  },err=>{ $stat.textContent=`位置エラー: ${err.message}`; },
-  {enableHighAccuracy:true,maximumAge:1000,timeout:10000});
-};
-
-$stop.onclick=()=>{
-  if(!tracking) return;
-  tracking=false;
-
-  if(watchId){ navigator.geolocation.clearWatch(watchId); watchId=null; }
-  clearInterval(startupSweepTimer);
-
-  $track.disabled=false; $stop.disabled=true;
-  $recBadge.style.display='none'; stopPulse();
-
-  // 地図回転をリセット
-  rotateMap(0); $compass.style.display='none';
-
-  unlockTTS();
-  enqueueSpeech(['評価を終了します']);
-};
-
-$chk.onclick=()=>{
-  if(!lastLatLng){ alert("現在地が取得できていません"); return; }
-  let memo=''; if($memo.checked) memo=prompt("メモ入力（任意）","");
-  const m=L.marker(lastLatLng,{icon:window.__OrangeIcon}).addTo(checkpointLayer);
-  m.feature={properties:{name:'チェックポイント', memo:memo||''}};
-  m.bindPopup(memo?`<b>CP</b><br>${memo}`:"<b>CP</b>");
-  m._announced=false; m._lastDist=Infinity;
-  checkNearAndSpeak(L.latLng(lastLatLng)); // 追加直後に半径内なら読む
-};
-
-$rec.onclick=()=>{ if(lastLatLng) map.setView(lastLatLng,16); };
-$fab.onclick=()=>$rec.click();
-
-/* ====== 演出 ====== */
-function startPulse(){ let up=true; pulseTimer=setInterval(()=>{ let r=me.options.radius; r=up?Math.min(11,r+0.5):Math.max(7,r-0.5); me.setStyle({radius:r}); if(r>=11)up=false; if(r<=7)up=true; },80); }
-function stopPulse(){ clearInterval(pulseTimer); pulseTimer=null; me.setStyle({radius:7}); }
-
-/* 初回位置（地図寄せ） */
-if(navigator.geolocation){
-  navigator.geolocation.getCurrentPosition(pos=>{
-    lastLatLng=[pos.coords.latitude,pos.coords.longitude];
-    me.setLatLng(lastLatLng); map.setView(lastLatLng,16);
-  },()=>{});
-}
-
-/* ====== エクスポート（GeoJSON） ====== */
-document.getElementById('export').onclick=()=>{
-  const gj={type:'FeatureCollection',features:[
-    {type:'Feature',properties:{kind:'track'},geometry:{type:'LineString',coordinates:trackLine.getLatLngs().map(ll=>[ll.lng,ll.lat])}}
-  ]};
-  Object.values(checkpointLayer._layers||{}).forEach(m=>{
-    const p=m.feature?.properties||{};
-    gj.features.push({type:'Feature',properties:{kind:'checkpoint',...p},geometry:{type:'Point',coordinates:[m.getLatLng().lng,m.getLatLng().lat]}});
-  });
-  const blob=new Blob([JSON.stringify(gj,null,2)],{type:'application/geo+json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download=`route_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.geojson`;
-  a.click(); URL.revokeObjectURL(a.href);
-};
+// D&Dでも読み込み
+window.addEventListener('dragover', e => { e.preventDefault(); });
+window.addEventListener('drop', async e => {
+  e.preventDefault();
+  const file = [...e.dataTransfer.files].find(f => /\.kmz$/i.test(f.name));
+  if (file) await loadKmz(file);
+});
 </script>
 </body>
 </html>
