@@ -4,11 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>実車評価支援ツール</title>
-<link rel="stylesheet" href="leaflet.css?v=250842" />
+<link rel="stylesheet" href="leaflet.css" />
 <style>
   html,body,#map{height:100%;margin:0}
   #map{background:#f2f2f2}
-  #panel{position:absolute;left:10px;top:10px;z-index:1000;background:#fff;padding:10px 12px;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;min-width:300px;max-width:min(94vw,460px)}
+  #panel{position:absolute;left:10px;top:10px;z-index:1000;background:#fff;padding:10px 12px;border-radius:14px;
+         box-shadow:0 6px 24px rgba(0,0,0,.18);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;
+         min-width:300px;max-width:min(94vw,460px)}
   #panel h1{margin:0 0 8px;font-size:14px;font-weight:700}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}
   .small{font-size:11px;color:#555}
@@ -18,11 +20,17 @@
   #recenter{background:#0ea5e9;color:#fff;border-color:#0ea5e9}
   #checkpoint{background:#f59e0b;color:#fff;border-color:#f59e0b}
   #export{background:#6366f1;color:#fff;border-color:#6366f1}
-  #fab-recenter{position:absolute;right:14px;bottom:14px;z-index:1000;width:50px;height:50px;border-radius:50%;display:grid;place-items:center;background:#0ea5e9;color:#fff;font-size:20px;border:none;box-shadow:0 6px 24px rgba(0,0,0,.18)}
-  #recBadge{position:absolute;right:12px;top:12px;z-index:1001;display:none;align-items:center;gap:6px;background:rgba(239,68,68,.95);color:#fff;padding:6px 10px;border-radius:9999px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:12px}
+  #fab-recenter{position:absolute;right:14px;bottom:14px;z-index:1000;width:50px;height:50px;border-radius:50%;
+                display:grid;place-items:center;background:#0ea5e9;color:#fff;font-size:20px;border:none;
+                box-shadow:0 6px 24px rgba(0,0,0,.18)}
+  #recBadge{position:absolute;right:12px;top:12px;z-index:1001;display:none;align-items:center;gap:6px;
+            background:rgba(239,68,68,.95);color:#fff;padding:6px 10px;border-radius:9999px;
+            box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:12px}
   .dot{width:10px;height:10px;border-radius:50%;background:#fff;animation:blink 1s infinite}
   @keyframes blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
-  #toast{position:absolute;left:50%;bottom:78px;transform:translateX(-50%);z-index:1002;display:none;max-width:min(92vw,520px);background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px}
+  #toast{position:absolute;left:50%;bottom:78px;transform:translateX(-50%);z-index:1002;display:none;
+         max-width:min(92vw,520px);background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:12px;
+         box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px}
 </style>
 </head>
 <body>
@@ -33,7 +41,7 @@
 <div id="panel">
   <h1>実車評価支援ツール</h1>
   <div class="row">
-    <input id="file" type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" />
+    <input id="file" type="file" accept=".kml,.kmz" />
     <button id="clear">クリア</button>
     <span id="fname" class="small">（未選択）</span>
   </div>
@@ -61,13 +69,18 @@
 
 <button id="fab-recenter">📍</button>
 
-<script src="leaflet.js?v=250842"></script>
+<script src="leaflet.js"></script>
 <script>
-/* 画像不要のSVGピン */
-(function(){const svg=encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#2A7FFF"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);const dataUrl=`data:image/svg+xml;charset=UTF-8,${svg}`;const LocalPin=L.Icon.extend({options:{iconUrl:dataUrl,iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30],shadowUrl:null}});L.Marker.prototype.options.icon=new LocalPin();})();
+/* SVG ピン */
+(function(){
+  const svg=encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#2A7FFF"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);
+  const dataUrl=`data:image/svg+xml;charset=UTF-8,${svg}`;
+  const LocalPin=L.Icon.extend({options:{iconUrl:dataUrl,iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
+  L.Marker.prototype.options.icon=new LocalPin();
+})();
 </script>
-<script src="jszip.min.js?v=250842"></script>
-<script src="togeojson.umd.js?v=250842"></script>
+<script src="jszip.min.js"></script>
+<script src="togeojson.umd.js"></script>
 
 <script>
 /* ====== Map ====== */
@@ -89,195 +102,101 @@ const $chk=document.getElementById('checkpoint'),$memo=document.getElementById('
 const $th=document.getElementById('th'),$thv=document.getElementById('thv'),$stat=document.getElementById('stat');
 const $recBadge=document.getElementById('recBadge'),$toast=document.getElementById('toast');
 
-/* ====== 音声（iOS対策）＋トースト／ビープ ====== */
-let voiceReady=false, audioCtx=null;
+/* ====== 音声系 ====== */
+let voiceReady=false,audioCtx=null;
 function getCtx(){return audioCtx ||= new (window.AudioContext||window.webkitAudioContext)();}
 function ensureAudio(){try{getCtx().resume();}catch(e){}}
-function preloadVoices(){try{speechSynthesis.getVoices();}catch(e){}}
-speechSynthesis?.addEventListener?.('voiceschanged',preloadVoices); preloadVoices();
 function unlockTTS(){try{ensureAudio();const c=getCtx(),o=c.createOscillator(),g=c.createGain();g.gain.value=0.05;o.connect(g).connect(c.destination);const t=c.currentTime;o.start(t);o.stop(t+0.08);voiceReady=true;}catch(e){}}
-function speakNow(text){ // 単発発話
+function speakNow(text){
   if(!voiceReady) unlockTTS(); ensureAudio();
   try{
     const u=new SpeechSynthesisUtterance(String(text)); u.lang='ja-JP'; u.rate=0.85;
-    const vs=speechSynthesis.getVoices?.()||[]; const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja')); if(ja) u.voice=ja;
+    const vs=speechSynthesis.getVoices?.()||[];const ja=vs.find(v=>(v.lang||'').startsWith('ja'));if(ja) u.voice=ja;
     const go=()=>speechSynthesis.speak(u);
-    if(speechSynthesis.speaking||speechSynthesis.pending){speechSynthesis.cancel(); setTimeout(go,50);} else go();
+    if(speechSynthesis.speaking||speechSynthesis.pending){speechSynthesis.cancel(); setTimeout(go,50);}else go();
   }catch(e){}
 }
 function beep(ms=140,f=880){try{ensureAudio();const c=getCtx(),o=c.createOscillator(),g=c.createGain();g.gain.setValueAtTime(0.08,c.currentTime);o.frequency.value=f;o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+ms/1000);}catch(e){}}
-let toastTimer=null; function toast(msg){$toast.textContent=msg;$toast.style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$toast.style.display='none';},2200);}
+let toastTimer=null;function toast(msg){$toast.textContent=msg;$toast.style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$toast.style.display='none';},2200);}
 
-/* 発話キュー：距離順に順番再生（多点同時を確実に読む） */
-let ttsQueue=[]; let ttsPlaying=false;
-function enqueueSpeech(texts){ // texts: string[]
-  if(!texts || !texts.length) return;
-  ttsQueue.push(...texts);
-  if(!ttsPlaying) playQueue();
-}
-function playQueue(){
-  if(ttsQueue.length===0){ ttsPlaying=false; return; }
-  ttsPlaying=true;
-  const text=ttsQueue.shift();
-  // 画面・効果音
-  toast(text); beep(130,880);
-  // 実発話
-  speakNow(text);
-  // 次アイテムまで間隔（iOSで潰れない安全域）
-  setTimeout(playQueue, 800); // 0.8秒間隔
-}
-
-function isStartName(name){ const n=(name||'').trim(); return /^start$/i.test(n)||/^スタート$/i.test(n); }
+/* 発話キュー */
+let ttsQueue=[], ttsPlaying=false;
+function enqueueSpeech(texts){ if(!texts||!texts.length) return; ttsQueue.push(...texts); if(!ttsPlaying) playQueue(); }
+function playQueue(){ if(!ttsQueue.length){ttsPlaying=false;return;} ttsPlaying=true;const text=ttsQueue.shift();toast(text);beep(130,880);speakNow(text);setTimeout(playQueue,800); }
 
 /* ====== KML/KMZ 読み込み ====== */
-function clearRoute(){ if(routeLayer){map.removeLayer(routeLayer); routeLayer=null;} routePointLayers.length=0; $fname.textContent='（未選択）'; }
+function clearRoute(){ if(routeLayer){map.removeLayer(routeLayer); routeLayer=null;} routePointLayers.length=0;$fname.textContent='（未選択）'; }
 $clear.onclick=clearRoute;
-
 $file.addEventListener('change', async (ev)=>{
-  const f=ev.target.files?.[0]; if(!f) return;
+  const f=ev.target.files?.[0];if(!f)return;
   $fname.textContent=f.name;
   try{
     let kmlText=null;
     if(/\.kmz$/i.test(f.name)){
-      const buf=await f.arrayBuffer();
-      const zip=await JSZip.loadAsync(buf);
+      const buf=await f.arrayBuffer();const zip=await JSZip.loadAsync(buf);
       const ent=Object.values(zip.files).find(z=>z.name.toLowerCase().endsWith('.kml'));
-      if(!ent){ alert('KMZ内にKMLがありません'); return; }
-      kmlText=await ent.async('string');
-    }else{
-      kmlText=await f.text();
-    }
-    const dom=new DOMParser().parseFromString(kmlText,'text/xml');
-    const gj=toGeoJSON.kml(dom);
-
+      if(!ent){alert('KMZにKMLがありません');return;} kmlText=await ent.async('string');
+    }else{kmlText=await f.text();}
+    const dom=new DOMParser().parseFromString(kmlText,'text/xml');const gj=toGeoJSON.kml(dom);
     if(routeLayer) map.removeLayer(routeLayer);
-    routeLayer=L.geoJSON(gj,{
-      style:{color:'#1d4ed8',weight:4},
-      pointToLayer:(feat,latlng)=>{
-        const name=feat.properties?.name||feat.properties?.Name||'';
-        const m=L.marker(latlng).bindPopup(name||'ポイント');
-        m.feature={properties:{name}}; m._announced=false; m._lastDist=Infinity;
-        routePointLayers.push(m); return m;
-      }
-    }).addTo(map);
-    try{ map.fitBounds(routeLayer.getBounds(),{padding:[20,20]}); }catch(_){}
-    if(tracking && lastLatLng) checkNearAndSpeak(L.latLng(lastLatLng)); // 追跡中は即判定
-  }catch(e){ alert('ファイル読込に失敗：'+(e?.message||e)); }
+    routeLayer=L.geoJSON(gj,{style:{color:'#1d4ed8',weight:4},pointToLayer:(feat,latlng)=>{
+      const name=feat.properties?.name||'';const m=L.marker(latlng).bindPopup(name||'ポイント');
+      m.feature={properties:{name}};m._announced=false;m._lastDist=Infinity;routePointLayers.push(m);return m;
+    }}).addTo(map);
+    try{map.fitBounds(routeLayer.getBounds(),{padding:[20,20]});}catch(_){}
+    if(tracking && lastLatLng) checkNearAndSpeak(L.latLng(lastLatLng));
+  }catch(e){alert('読込失敗:'+e);}
 });
 
-/* ====== 半径内チェック（距離順に読み上げ） ====== */
+/* ====== 判定 ====== */
 function checkNearAndSpeak(here){
-  const list=[...routePointLayers, ...Object.values(checkpointLayer._layers||{})];
+  const list=[...routePointLayers,...Object.values(checkpointLayer._layers||{})];
   const hits=[];
   for(const layer of list){
-    if(!layer?.getLatLng || layer._announced) continue;
-    const dist=map.distance(here, layer.getLatLng());
-    layer._lastDist=dist;
-    if(dist<=notifyMeters){
-      const p=layer.feature?.properties||{}, name=(p.name||'').trim(), memo=(p.memo||'').trim();
-      if(isStartName(name)) { layer._announced=true; continue; } // Startは無視して既読扱い
-      const text = (name||memo) ? [name,memo].filter(Boolean).join('。') : 'チェックポイント';
-      hits.push({dist,text,layer});
-    }
+    if(!layer?.getLatLng||layer._announced) continue;
+    const dist=map.distance(here,layer.getLatLng());layer._lastDist=dist;
+    const p=layer.feature?.properties||{};const name=(p.name||'').trim();const memo=(p.memo||'').trim();
+    if(dist<=notifyMeters){ const text=(name||memo)?[name,memo].filter(Boolean).join('。'):'チェックポイント'; hits.push({dist,text,layer}); }
   }
-  if(hits.length){
-    // 近い順に並べて、一括で既読 → まとめて発話キューへ
-    hits.sort((a,b)=>a.dist-b.dist);
-    hits.forEach(h=>h.layer._announced=true);
-    enqueueSpeech(hits.map(h=>h.text));
-  }
+  if(hits.length){hits.sort((a,b)=>a.dist-b.dist);hits.forEach(h=>h.layer._announced=true);enqueueSpeech(hits.map(h=>h.text));}
 }
 
 /* ====== UI操作 ====== */
-document.getElementById('tts').onclick=()=>{ unlockTTS(); setTimeout(()=>{ enqueueSpeech(['テストです']); },120); };
-$th.oninput=()=>{ notifyMeters=+$th.value; $thv.textContent=`${notifyMeters}m`; };
+document.getElementById('tts').onclick=()=>{unlockTTS();setTimeout(()=>enqueueSpeech(['テストです']),120);};
+$th.oninput=()=>{notifyMeters=+$th.value;$thv.textContent=`${notifyMeters}m`;};
 
 $track.onclick=()=>{
-  if(tracking) return;
-  unlockTTS();
-  setTimeout(()=>enqueueSpeech(['評価を開始します']),120);
-
-  tracking=true;
-  $track.disabled=true; $stop.disabled=false;
-  $recBadge.style.display='flex'; startPulse();
-  trackLine.setLatLngs([]); checkpointLayer.clearLayers();
-
-  // その場チェック（取得済みの現在地）
+  if(tracking)return;
+  unlockTTS();setTimeout(()=>enqueueSpeech(['評価を開始します']),120);
+  tracking=true;$track.disabled=true;$stop.disabled=false;$recBadge.style.display='flex';startPulse();
+  trackLine.setLatLngs([]);checkpointLayer.clearLayers();
   if(lastLatLng) checkNearAndSpeak(L.latLng(lastLatLng));
-
-  // 直ちに一発測位してチェック（許可促進＆初期化）
   if(navigator.geolocation){
-    navigator.geolocation.getCurrentPosition(pos=>{
-      lastLatLng=[pos.coords.latitude,pos.coords.longitude];
-      me.setLatLng(lastLatLng); map.setView(lastLatLng,16);
-      checkNearAndSpeak(L.latLng(lastLatLng));
-    },()=>{}, {enableHighAccuracy:true,timeout:8000});
+    navigator.geolocation.getCurrentPosition(pos=>{lastLatLng=[pos.coords.latitude,pos.coords.longitude];me.setLatLng(lastLatLng);map.setView(lastLatLng,16);checkNearAndSpeak(L.latLng(lastLatLng));});
   }
-
-  // 開始直後 20秒間は2秒おきに再チェック（密集点取りこぼし防止）
-  let sweep=0; clearInterval(startupSweepTimer);
-  startupSweepTimer=setInterval(()=>{
-    if(!tracking){ clearInterval(startupSweepTimer); return; }
-    if(lastLatLng) checkNearAndSpeak(L.latLng(lastLatLng));
-    if(++sweep>=10) clearInterval(startupSweepTimer);
-  },2000);
-
-  // 通常追跡
-  watchId=navigator.geolocation.watchPosition(pos=>{
-    lastLatLng=[pos.coords.latitude,pos.coords.longitude];
-    me.setLatLng(lastLatLng); trackLine.addLatLng(lastLatLng);
-    checkNearAndSpeak(L.latLng(lastLatLng));
-  },err=>{ $stat.textContent=`位置エラー: ${err.message}`; },
-  {enableHighAccuracy:true,maximumAge:1000,timeout:10000});
+  let sweep=0;clearInterval(startupSweepTimer);
+  startupSweepTimer=setInterval(()=>{if(!tracking){clearInterval(startupSweepTimer);return;}if(lastLatLng)checkNearAndSpeak(L.latLng(lastLatLng));if(++sweep>=10)clearInterval(startupSweepTimer);},2000);
+  watchId=navigator.geolocation.watchPosition(pos=>{lastLatLng=[pos.coords.latitude,pos.coords.longitude];me.setLatLng(lastLatLng);trackLine.addLatLng(lastLatLng);checkNearAndSpeak(L.latLng(lastLatLng));},
+    err=>{$stat.textContent=`位置エラー:${err.message}`;},{enableHighAccuracy:true,maximumAge:1000,timeout:10000});
 };
 
-$stop.onclick=()=>{
-  if(!tracking) return;
-  tracking=false;
-  if(watchId){ navigator.geolocation.clearWatch(watchId); watchId=null; }
-  clearInterval(startupSweepTimer);
-  $track.disabled=false; $stop.disabled=true;
-  $recBadge.style.display='none'; stopPulse();
-};
+$stop.onclick=()=>{if(!tracking)return;tracking=false;if(watchId){navigator.geolocation.clearWatch(watchId);watchId=null;}clearInterval(startupSweepTimer);$track.disabled=false;$stop.disabled=true;$recBadge.style.display='none';stopPulse();};
 
-$chk.onclick=()=>{
-  if(!lastLatLng){ alert("現在地が取得できていません"); return; }
-  let memo=''; if($memo.checked) memo=prompt("メモ入力（任意）","");
-  const m=L.marker(lastLatLng).addTo(checkpointLayer);
-  m.feature={properties:{name:'チェックポイント', memo:memo||''}};
-  m.bindPopup(memo?`<b>CP</b><br>${memo}`:"<b>CP</b>");
-  m._announced=false; m._lastDist=Infinity;
-  checkNearAndSpeak(L.latLng(lastLatLng)); // 追加直後に判定
-};
+$chk.onclick=()=>{if(!lastLatLng){alert("現在地なし");return;}let memo='';if($memo.checked)memo=prompt("メモ入力","");const m=L.marker(lastLatLng).addTo(checkpointLayer);m.feature={properties:{name:'チェックポイント',memo:memo||''}};m.bindPopup(memo?`<b>CP</b><br>${memo}`:"<b>CP</b>");m._announced=false;m._lastDist=Infinity;checkNearAndSpeak(L.latLng(lastLatLng));};
 
-$rec.onclick=()=>{ if(lastLatLng) map.setView(lastLatLng,16); };
-$fab.onclick=()=>$rec.click();
+$rec.onclick=()=>{if(lastLatLng)map.setView(lastLatLng,16);};$fab.onclick=()=>$rec.click();
 
 /* ====== 演出 ====== */
-function startPulse(){ let up=true; pulseTimer=setInterval(()=>{ let r=me.options.radius; r=up?Math.min(11,r+0.5):Math.max(7,r-0.5); me.setStyle({radius:r}); if(r>=11)up=false; if(r<=7)up=true; },80); }
-function stopPulse(){ clearInterval(pulseTimer); pulseTimer=null; me.setStyle({radius:7}); }
+function startPulse(){let up=true;pulseTimer=setInterval(()=>{let r=me.options.radius;r=up?Math.min(11,r+0.5):Math.max(7,r-0.5);me.setStyle({radius:r});if(r>=11)up=false;if(r<=7)up=true;},80);}
+function stopPulse(){clearInterval(pulseTimer);pulseTimer=null;me.setStyle({radius:7});}
 
-/* 初回位置（地図を寄せる） */
-if(navigator.geolocation){
-  navigator.geolocation.getCurrentPosition(pos=>{
-    lastLatLng=[pos.coords.latitude,pos.coords.longitude];
-    me.setLatLng(lastLatLng); map.setView(lastLatLng,16);
-  },()=>{});
-}
+if(navigator.geolocation){navigator.geolocation.getCurrentPosition(pos=>{lastLatLng=[pos.coords.latitude,pos.coords.longitude];me.setLatLng(lastLatLng);map.setView(lastLatLng,16);});}
 
 /* ====== エクスポート ====== */
 document.getElementById('export').onclick=()=>{
-  const gj={type:'FeatureCollection',features:[
-    {type:'Feature',properties:{kind:'track'},geometry:{type:'LineString',coordinates:trackLine.getLatLngs().map(ll=>[ll.lng,ll.lat])}}
-  ]};
-  Object.values(checkpointLayer._layers||{}).forEach(m=>{
-    const p=m.feature?.properties||{};
-    gj.features.push({type:'Feature',properties:{kind:'checkpoint',...p},geometry:{type:'Point',coordinates:[m.getLatLng().lng,m.getLatLng().lat]}});
-  });
-  const blob=new Blob([JSON.stringify(gj,null,2)],{type:'application/geo+json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download=`route_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.geojson`;
-  a.click(); URL.revokeObjectURL(a.href);
+  const gj={type:'FeatureCollection',features:[{type:'Feature',properties:{kind:'track'},geometry:{type:'LineString',coordinates:trackLine.getLatLngs().map(ll=>[ll.lng,ll.lat])}}]};
+  Object.values(checkpointLayer._layers||{}).forEach(m=>{const p=m.feature?.properties||{};gj.features.push({type:'Feature',properties:{kind:'checkpoint',...p},geometry:{type:'Point',coordinates:[m.getLatLng().lng,m.getLatLng().lat]}});});
+  const blob=new Blob([JSON.stringify(gj,null,2)],{type:'application/geo+json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`route_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.geojson`;a.click();URL.revokeObjectURL(a.href);
 };
 </script>
 </body>
