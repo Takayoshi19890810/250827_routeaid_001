@@ -1,303 +1,320 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>実車評価支援ツール</title>
-<link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#0ea5e9">
-<link rel="stylesheet" href="leaflet.css">
-<style>
-html,body,#map{height:100%;margin:0}
-#panel{
-  position:absolute;top:10px;left:10px;z-index:1000;
-  background:#fff;padding:10px 12px;border-radius:12px;
-  box-shadow:0 2px 12px rgba(0,0,0,.2);
-  font-family:system-ui, sans-serif;min-width:260px;max-width:min(92vw,420px)
-}
-#panel h1{font-size:14px; margin:0 0 6px; font-weight:700}
-#panel .row{display:flex; gap:6px; align-items:center; margin:6px 0; flex-wrap:wrap}
-#panel label{font-size:12px}
-.badge{display:inline-block;background:#eef;border:1px solid #ccd;border-radius:6px;padding:1px 6px;font-size:11px}
-.small{font-size:11px;color:#555}
-button{cursor:pointer}
-#recenter{background:#0ea5e9;color:#fff;border:none;border-radius:8px;padding:6px 10px}
-.toggle{display:inline-flex;align-items:center;gap:6px}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Route Aid – 追跡＆軌跡保存</title>
+  <link rel="stylesheet" href="./leaflet.css" />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    header { padding: .5rem .75rem; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; box-shadow: 0 1px 0 rgba(0,0,0,.08); }
+    header .title { font-weight: 700; margin-right: .5rem; }
+    header .sep { width: 1px; height: 24px; background: #e5e7eb; margin: 0 .25rem; }
+    header button, header input, header select, header label { font-size: 14px; }
+    header button { padding: .5rem .7rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff; cursor: pointer; }
+    header button.primary { background: #111827; color: white; border-color: #111827; }
+    header button.destructive { background: #dc2626; color: white; border-color: #dc2626; }
+    header button:disabled { opacity: .5; cursor: not-allowed; }
+    header .pill { padding: .35rem .6rem; border-radius: 999px; background: #f3f4f6; }
+    #map { width: 100%; height: 100%; }
+    .stat { font-variant-numeric: tabular-nums; }
+    .toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); background: rgba(0,0,0,.85); color:#fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; z-index: 9999; }
+  </style>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <script>
+    // PWA: SW登録（既存の sw.js をそのまま利用）
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(console.warn);
+      });
+    }
+  </script>
 </head>
 <body>
-<div id="map"></div>
+<div id="app">
+  <header>
+    <span class="title">Route Aid</span>
+    <span class="sep"></span>
 
-<div id="panel">
-  <h1>実車評価支援ツール</h1>
+    <button id="btnStart" class="primary">▶ 追跡開始</button>
+    <button id="btnPause" disabled>⏸ 一時停止</button>
+    <button id="btnResume" disabled>▶ 再開</button>
+    <button id="btnStop" class="destructive" disabled>■ 停止</button>
 
-  <div class="row">
-    <input type="file" id="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz">
-    <button id="clear">クリア</button>
-  </div>
+    <span class="sep"></span>
 
-  <div class="row">
-    <button id="track">位置追跡を開始</button>
-    <button id="stop">停止</button>
-    <button id="recenter">現在地へ</button>
-    <label class="toggle"><input type="checkbox" id="follow" checked> 自動追従</label>
-  </div>
+    <span class="pill stat">距離: <span id="dist">0.00</span> km</span>
+    <span class="pill stat">ポイント: <span id="pts">0</span></span>
 
-  <div class="row">
-    <button id="export">GPXエクスポート</button>
-    <label class="toggle"><input type="checkbox" id="wpExport" checked> チェックポイントも含める</label>
-  </div>
+    <span class="sep"></span>
 
-  <div class="row"><label>通知距離: <span id="thv" class="badge">100m</span></label></div>
-  <input id="th" type="range" min="20" max="300" value="100" style="width:100%">
+    <label>ファイル名: <input id="fname" placeholder="Track_YYYYMMDD_HHMMSS" style="width: 190px"/></label>
+    <button id="btnSaveGPX" disabled>💾 GPX保存</button>
+    <button id="btnSaveGeoJSON" disabled>💾 GeoJSON保存</button>
 
-  <div class="row">
-    <button id="tts">音声テスト</button>
-    <span class="small" id="stat"></span>
-  </div>
-
-  <div class="small">※ オンライン時に表示した地図は自動でキャッシュされ、オフラインでも利用可能です。</div>
+    <button id="btnPickDir" title="対応ブラウザのみ（Chrome/Edge等）">📁 保存先フォルダ指定</button>
+    <span id="dirLabel" class="pill" title="File System Access API">未指定</span>
+  </header>
+  <div id="map"></div>
 </div>
 
+<script src="./leaflet.js"></script>
 <script>
-// Service Worker 登録（PWA/オフライン対応）
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js');
-}
-</script>
-<script src="leaflet.js"></script>
-<script src="jszip.min.js"></script>
-<script src="togeojson.umd.js"></script>
-<script>
-/* =====================
-   地図・レイヤ初期化
-===================== */
-const map = L.map('map', { zoomControl: true }).setView([35.0, 135.0], 14);
+  // ====== 追跡・描画のコア状態 ======
+  let map, currentMarker, trackLine;
+  let watchId = null;
+  let points = []; // {lat, lng, t}
+  let distMeters = 0;
+  let following = true; // 開始時は追従
 
-const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-  attribution: '&copy; OpenStreetMap contributors'
-}).addTo(map);
+  // 保存先（File System Access API）
+  let dirHandle = null; // フォルダハンドル（権限付与済みならここに保持）
 
-/* =====================
-   状態・要素参照
-===================== */
-let threshold = 100;
-let points = [];
-let watchId = null;
-let meLayer = null;
-let routeLayer = null, pointLayer = null;
-let lastHere = null;
-let follow = true;
-let trackLine = null;     // 走行軌跡（赤線）
-let trackPoints = [];     // 走行点ログ {lat, lng, time}
+  // ====== 初期化 ======
+  function init() {
+    map = L.map('map');
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
 
-const elTh     = document.getElementById('th');
-const elThV    = document.getElementById('thv');
-const elStat   = document.getElementById('stat');
-const elFollow = document.getElementById('follow');
-const elPanel  = document.getElementById('panel');
+    // 初期位置は日本中心あたり
+    map.setView([35.681236, 139.767125], 13);
 
-/* =====================
-   UIイベント
-===================== */
-elTh.addEventListener('input', ()=>{ threshold = +elTh.value; elThV.textContent = threshold + 'm'; });
-elFollow.addEventListener('change', ()=>{ follow = elFollow.checked; if (follow && lastHere) recenterWithOffset(lastHere); });
-document.getElementById('recenter').addEventListener('click', ()=>{ if(lastHere){ follow = true; elFollow.checked = true; recenterWithOffset(lastHere); } });
-document.getElementById('tts').addEventListener('click', ()=> speak('音声テストです'));
-document.getElementById('clear').addEventListener('click', ()=>{
-  if(routeLayer) map.removeLayer(routeLayer);
-  if(pointLayer) map.removeLayer(pointLayer);
-  if(trackLine) { map.removeLayer(trackLine); trackLine = null; }
-  points = [];
-  trackPoints = []; // ★軌跡ログもクリア
-});
-document.getElementById('track').addEventListener('click', startTrack);
-document.getElementById('stop').addEventListener('click', ()=>{
-  if(watchId){ navigator.geolocation.clearWatch(watchId); watchId=null; elStat.textContent=''; }
-});
-document.getElementById('file').addEventListener('change', onFile);
-document.getElementById('export').addEventListener('click', exportGPX);
+    trackLine = L.polyline([], { color: 'red', weight: 4, opacity: 0.9 }).addTo(map);
 
-map.on('dragstart zoomstart', ()=>{ follow = false; elFollow.checked = false; });
+    // UIイベント
+    document.getElementById('btnStart').addEventListener('click', startTracking);
+    document.getElementById('btnPause').addEventListener('click', pauseTracking);
+    document.getElementById('btnResume').addEventListener('click', resumeTracking);
+    document.getElementById('btnStop').addEventListener('click', stopTracking);
+    document.getElementById('btnSaveGPX').addEventListener('click', () => saveTrack('gpx'));
+    document.getElementById('btnSaveGeoJSON').addEventListener('click', () => saveTrack('geojson'));
+    document.getElementById('btnPickDir').addEventListener('click', pickDirectory);
 
-/* =====================
-   便利関数
-===================== */
-function speak(text){
-  try{
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ja-JP';
-    speechSynthesis.speak(u);
-  }catch(e){}
-}
-function dist(a,b){
-  const R = 6371000; const toRad = d=> d * Math.PI/180;
-  const dlat = toRad(b.lat-a.lat), dlon = toRad(b.lng-a.lng);
-  const s = Math.sin(dlat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dlon/2)**2;
-  return 2*R*Math.asin(Math.sqrt(s));
-}
-// パネルで隠れないよう、少し上にオフセット
-function recenterWithOffset(latlng){
-  map.setView(latlng, undefined, {animate:false});
-  const y = -(Math.min(elPanel.offsetHeight, 240) + 20) / 2; // 見やすく微調整
-  map.panBy([0, y], {animate:false});
-}
-
-/* =====================
-   KML/KMZ読み込み
-===================== */
-async function onFile(ev){
-  const f = ev.target.files[0];
-  if(!f) return;
-  const isKMZ = /\.kmz$/i.test(f.name);
-  let kmlText = null;
-
-  if(isKMZ){
-    const buf = await f.arrayBuffer();
-    const zip = await JSZip.loadAsync(buf);
-    let kmlEntry = null;
-    zip.forEach((p, entry)=>{ if(!kmlEntry && p.toLowerCase().endsWith('.kml')) kmlEntry = entry; });
-    if(!kmlEntry) return alert('KMZ内にKMLがありません');
-    kmlText = await kmlEntry.async('string');
-  } else {
-    kmlText = await f.text();
+    // 既定ファイル名
+    document.getElementById('fname').value = defaultFileName();
   }
-  const kmlDom = new DOMParser().parseFromString(kmlText, 'text/xml');
-  const gj = toGeoJSON.kml(kmlDom);
 
-  if(routeLayer) map.removeLayer(routeLayer);
-  if(pointLayer) map.removeLayer(pointLayer);
-  points = [];
+  function toast(msg, ms = 1600) {
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), ms);
+  }
 
-  // ルート（LineStringなど）
-  const lineFeats = gj.features.filter(ft => ft.geometry && ft.geometry.type.includes('Line'));
-  const lines = lineFeats.map(ft => L.polyline(ft.geometry.coordinates.map(c=>[c[1], c[0]]), {color:'#2b8a3e', weight:4}));
-  routeLayer = L.layerGroup(lines).addTo(map);
+  function defaultFileName() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `Track_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  }
 
-  // チェックポイント（Point）
-  const ptFeats = gj.features.filter(ft => ft.geometry && ft.geometry.type === 'Point');
-  pointLayer = L.geoJSON({type:'FeatureCollection', features: ptFeats}, {
-    pointToLayer: (ft, latlng)=> L.circleMarker(latlng, {radius:7, color:'#1e3a8a', weight:2, fillColor:'#60a5fa', fillOpacity:.85}),
-    onEachFeature: (ft, layer)=>{
-      const name = ft.properties.name || 'チェックポイント';
-      const desc = ft.properties.description || '';
-      layer.bindPopup(`<b>${name}</b><br>${desc}`);
-      points.push({latlng: layer.getLatLng(), name, desc, announced:false});
+  // ====== 追跡ロジック ======
+  function startTracking() {
+    if (!('geolocation' in navigator)) { toast('この端末は位置情報に未対応です'); return; }
+
+    points = []; distMeters = 0;
+    updateStats();
+    trackLine.setLatLngs([]);
+
+    if (currentMarker) { currentMarker.remove(); }
+
+    const options = {
+      enableHighAccuracy: true,
+      maximumAge: 1000,
+      timeout: 20000
+    };
+
+    watchId = navigator.geolocation.watchPosition(onPos, onErr, options);
+
+    setButtons({ running: true, paused: false });
+    toast('評価を開始します（追跡開始）');
+  }
+
+  function onPos(pos) {
+    const { latitude: lat, longitude: lng } = pos.coords;
+    const t = new Date();
+
+    // 末尾と距離計算
+    const last = points.length ? points[points.length - 1] : null;
+    const p = { lat, lng, t: t.toISOString() };
+    points.push(p);
+
+    if (last) distMeters += haversine(last.lat, last.lng, lat, lng);
+
+    // 描画更新
+    trackLine.addLatLng([lat, lng]);
+
+    if (!currentMarker) {
+      currentMarker = L.marker([lat, lng]).addTo(map);
+    } else {
+      currentMarker.setLatLng([lat, lng]);
     }
-  }).addTo(map);
 
-  const group = L.featureGroup([routeLayer, pointLayer]);
-  map.fitBounds(group.getBounds().pad(0.2));
-}
-
-/* =====================
-   位置追跡・通知
-===================== */
-function startTrack(){
-  if(watchId) navigator.geolocation.clearWatch(watchId);
-  watchId = navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true, maximumAge:1000, timeout:10000});
-}
-
-function onPos(pos){
-  const {latitude, longitude, accuracy, speed} = pos.coords;
-  const here = L.latLng(latitude, longitude);
-  lastHere = here;
-  elStat.textContent = `精度 ${Math.round(accuracy||0)}m / 速度 ${speed!=null?Math.round(speed*3.6):'-'}km/h`;
-
-  // 現在地マーカー
-  if(!meLayer){
-    meLayer = L.circleMarker(here, {radius:8, color:'#dc2626', weight:3, fillColor:'#fecaca', fillOpacity:1}).addTo(map);
-  }else{
-    meLayer.setLatLng(here);
-  }
-
-  // 走行軌跡（赤線）
-  if(!trackLine){
-    trackLine = L.polyline([here], {color:'#f00', weight:3}).addTo(map);
-  } else {
-    trackLine.addLatLng(here);
-  }
-  // 軌跡ログにも保存
-  trackPoints.push({ lat: latitude, lng: longitude, time: new Date(pos.timestamp) });
-
-  // 中央補正（パネル分オフセット）
-  if(follow){ recenterWithOffset(here); }
-
-  // 近接通知
-  for(const p of points){
-    if(p.announced) continue;
-    if(dist(here, p.latlng) <= threshold){
-      p.announced = true;
-      speak(p.name + '。 ' + p.desc);
+    if (following) {
+      map.setView([lat, lng], Math.max(map.getZoom(), 16), { animate: false });
     }
+
+    updateStats();
   }
-}
-function onErr(err){ alert('位置取得に失敗: ' + err.message); }
 
-/* =====================
-   GPXエクスポート
-===================== */
-function exportGPX(){
-  if (!trackPoints.length) {
-    alert('走行軌跡がありません。まず「位置追跡を開始」で走行してください。');
-    return;
+  function onErr(err) {
+    console.warn('Geolocation error:', err);
+    toast('位置情報の取得に失敗しました');
   }
-  const includeWpts = document.getElementById('wpExport')?.checked ?? true;
 
-  const esc = s => s.replace(/[<&>"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
-  let gpx = '';
-  gpx += `<?xml version="1.0" encoding="UTF-8"?>\n`;
-  gpx += `<gpx version="1.1" creator="RouteAid" xmlns="http://www.topografix.com/GPX/1/1" `;
-  gpx += `xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" `;
-  gpx += `xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">\n`;
-
-  // (任意) チェックポイントを wpt として
-  if (includeWpts && points.length) {
-    for (const p of points) {
-      const name = p.name || 'CheckPoint';
-      const desc = p.desc || '';
-      gpx += `  <wpt lat="${p.latlng.lat}" lon="${p.latlng.lng}">\n`;
-      gpx += `    <name>${esc(name)}</name>\n`;
-      if (desc) gpx += `    <desc>${esc(desc)}</desc>\n`;
-      gpx += `  </wpt>\n`;
+  function pauseTracking() {
+    if (watchId != null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+      setButtons({ running: false, paused: true });
+      toast('一時停止');
     }
   }
 
-  // 軌跡トラック
-  gpx += `  <trk>\n`;
-  gpx += `    <name>Recorded Track</name>\n`;
-  gpx += `    <trkseg>\n`;
-  for (const pt of trackPoints) {
-    const iso = pt.time instanceof Date ? pt.time.toISOString() : new Date(pt.time).toISOString();
-    gpx += `      <trkpt lat="${pt.lat}" lon="${pt.lng}"><time>${iso}</time></trkpt>\n`;
+  function resumeTracking() {
+    if (watchId == null) {
+      startTracking(); // 位置監視を再開（配列は継続利用）
+      setButtons({ running: true, paused: false, resume: true });
+      toast('追跡を再開');
+    }
   }
-  gpx += `    </trkseg>\n`;
-  gpx += `  </trk>\n`;
-  gpx += `</gpx>\n`;
 
-  const blob = new Blob([gpx], {type: 'application/gpx+xml'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const ts = new Date().toISOString().replace(/[:.]/g,'-');
-  a.href = url;
-  a.download = `routeaid-track-${ts}.gpx`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+  function stopTracking() {
+    if (watchId != null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+    setButtons({ running: false, paused: false, stopped: true });
+    toast('停止しました。保存できます');
+  }
 
-/* =====================
-   ショートカット連動 (?track / ?open)
-===================== */
-const params = new URLSearchParams(location.search);
-if (params.get('track') === '1') {
-  window.addEventListener('load', () => { document.getElementById('track').click(); });
-}
-if (params.get('open') === '1') {
-  window.addEventListener('load', () => { document.getElementById('file').click(); });
-}
+  function setButtons(state) {
+    const start = document.getElementById('btnStart');
+    const pause = document.getElementById('btnPause');
+    const resume = document.getElementById('btnResume');
+    const stopB = document.getElementById('btnStop');
+    const saveG = document.getElementById('btnSaveGPX');
+    const saveJ = document.getElementById('btnSaveGeoJSON');
+
+    if (state.running) {
+      start.disabled = true; pause.disabled = false; resume.disabled = true; stopB.disabled = false; saveG.disabled = true; saveJ.disabled = true;
+    } else if (state.paused) {
+      start.disabled = true; pause.disabled = true; resume.disabled = false; stopB.disabled = false; saveG.disabled = true; saveJ.disabled = true;
+    } else if (state.stopped) {
+      start.disabled = false; pause.disabled = true; resume.disabled = true; stopB.disabled = true; saveG.disabled = false; saveJ.disabled = false;
+    } else {
+      // 初期
+      start.disabled = false; pause.disabled = true; resume.disabled = true; stopB.disabled = true; saveG.disabled = true; saveJ.disabled = true;
+    }
+  }
+
+  function updateStats() {
+    document.getElementById('pts').textContent = String(points.length);
+    document.getElementById('dist').textContent = (distMeters / 1000).toFixed(2);
+  }
+
+  // ====== 保存処理 ======
+  async function saveTrack(fmt) {
+    if (points.length < 2) { toast('保存できる軌跡がありません'); return; }
+
+    const nameRaw = (document.getElementById('fname').value || defaultFileName()).trim();
+    const safe = nameRaw.replace(/[^\w\-_.]/g, '_');
+    const filename = fmt === 'gpx' ? `${safe}.gpx` : `${safe}.geojson`;
+
+    try {
+      let dataStr, mime;
+      if (fmt === 'gpx') { dataStr = buildGPX(points); mime = 'application/gpx+xml'; }
+      else { dataStr = JSON.stringify(buildGeoJSON(points), null, 2); mime = 'application/geo+json'; }
+
+      if (dirHandle && (await verifyPermission(dirHandle, true))) {
+        const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(new Blob([dataStr], { type: mime }));
+        await writable.close();
+        toast(`保存しました: ${filename}`);
+      } else {
+        // Fallback: 通常のダウンロード
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([dataStr], { type: mime }));
+        a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        toast('ダウンロードを開始しました');
+      }
+    } catch (e) {
+      console.error(e);
+      toast('保存に失敗しました');
+    }
+  }
+
+  function buildGeoJSON(pts) {
+    return {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: {
+          name: 'Recorded Track',
+          points: pts.length,
+          distance_m: Math.round(distMeters)
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: pts.map(p => [p.lng, p.lat])
+        }
+      }]
+    };
+  }
+
+  function buildGPX(pts) {
+    const esc = s => s.replace(/[<&>]/g, c => ({'<':'&lt;','&':'&amp;','>':'&gt;'}[c]));
+    const trkpts = pts.map(p => `      <trkpt lat="${p.lat}" lon="${p.lng}">\n        <time>${p.t}</time>\n      </trkpt>`).join('\n');
+    return `<?xml version="1.0" encoding="UTF-8"?>\n`+
+`<gpx version="1.1" creator="Route Aid" xmlns="http://www.topografix.com/GPX/1/1">\n`+
+`  <trk>\n`+
+`    <name>${esc(document.getElementById('fname').value || 'Recorded Track')}</name>\n`+
+`    <trkseg>\n`+
+`${trkpts}\n`+
+`    </trkseg>\n`+
+`  </trk>\n`+
+`</gpx>`;
+  }
+
+  async function pickDirectory() {
+    if (!('showDirectoryPicker' in window)) { toast('このブラウザはフォルダ指定に未対応です。ダウンロード保存をご利用ください'); return; }
+    try {
+      dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      if (await verifyPermission(dirHandle, true)) {
+        document.getElementById('dirLabel').textContent = '指定済み';
+        toast('保存先フォルダを指定しました');
+      }
+    } catch (e) {
+      if (e && e.name !== 'AbortError') console.warn(e);
+    }
+  }
+
+  async function verifyPermission(fileHandle, withWrite) {
+    const opts = {};
+    if (withWrite) opts.mode = 'readwrite';
+    if ((await fileHandle.queryPermission(opts)) === 'granted') return true;
+    if ((await fileHandle.requestPermission(opts)) === 'granted') return true;
+    return false;
+  }
+
+  // ====== 距離（メートル）計算（Haversine） ======
+  function haversine(lat1, lon1, lat2, lon2) {
+    const R = 6371000; // m
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  }
+
+  // 起動
+  init();
 </script>
 </body>
 </html>
