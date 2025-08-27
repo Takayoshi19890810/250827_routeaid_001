@@ -7,16 +7,17 @@
 <link rel="stylesheet" href="leaflet.css" />
 <style>
   html,body,#map{height:100%;margin:0}
-  #map{background:#f2f2f2}
+  #map{background:#f2f2f2; transform-origin:center center;} /* 回転の基点 */
   #panel{
     position:absolute;left:10px;top:10px;z-index:1000;
     background:#fff;padding:10px 12px;border-radius:14px;
     box-shadow:0 6px 24px rgba(0,0,0,.18);
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;
-    min-width:300px;max-width:min(94vw,460px)
+    min-width:300px;max-width:min(94vw,520px)
   }
   #panel h1{margin:0 0 8px;font-size:14px;font-weight:700}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}
+  .row > label{white-space:nowrap}
   .small{font-size:11px;color:#555}
   button{padding:6px 10px;border-radius:10px;cursor:pointer;border:1px solid #ddd;background:#fff}
   #track{background:#16a34a;color:#fff;border-color:#16a34a}
@@ -43,12 +44,24 @@
     background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:12px;
     box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px
   }
+  /* コンパス（Course Up のときに方位を示す） */
+  #compass{
+    position:absolute;right:14px;top:74px;z-index:1000;
+    width:44px;height:44px;border-radius:50%;background:#fff;
+    box-shadow:0 4px 12px rgba(0,0,0,.2); display:grid;place-items:center;
+    font-size:12px;color:#111;
+  }
+  #compassArrow{width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:14px solid #ef4444;transform-origin:50% 90%}
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="recBadge"><span class="dot"></span>追跡中</div>
 <div id="toast"></div>
+<div id="compass" style="display:none">
+  <div id="compassArrow"></div>
+  <div style="font-size:10px;margin-top:2px">N</div>
+</div>
 
 <div id="panel">
   <h1>実車評価支援ツール</h1>
@@ -76,6 +89,17 @@
   </div>
 
   <div class="row">
+    <label><input type="checkbox" id="keepCentered" />自車を常に中心</label>
+    <span class="small">（ONで追跡中は自車を中央に固定）</span>
+  </div>
+
+  <div class="row" style="gap:14px">
+    <label>地図の向き:</label>
+    <label><input type="radio" name="orient" value="north" checked /> 北を上</label>
+    <label><input type="radio" name="orient" value="course" /> 進行方向を上</label>
+  </div>
+
+  <div class="row">
     <button id="export">エクスポート</button>
     <span id="stat" class="small"></span>
   </div>
@@ -90,16 +114,22 @@
 
 <script src="leaflet.js"></script>
 
-<!-- ピン：青（KMLの“採用ポイント”）／オレンジ（手動CP） -->
+<!-- ピン：青=意味のあるKMLポイント / 灰=ルート汎用ピン / 橙=手動CP -->
 <script>
 (function(){
-  const blueSVG = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#2A7FFF"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);
-  const orangeSVG = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#F59E0B"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);
-  const BlueIcon   = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${blueSVG}`,   iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
-  const OrangeIcon = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${orangeSVG}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
-  L.Marker.prototype.options.icon = new BlueIcon();
-  window.__BlueIcon   = new BlueIcon();
-  window.__OrangeIcon = new OrangeIcon();
+  function svg(color){return encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36">
+      <path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="${color}"/>
+      <circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`
+  );}
+  const Blue   = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${svg('#2A7FFF')}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
+  const Orange = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${svg('#F59E0B')}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
+  const Gray   = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${svg('#9CA3AF')}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
+  // 既定は青（意味のあるポイント）
+  L.Marker.prototype.options.icon = new Blue();
+  window.__BlueIcon   = new Blue();
+  window.__OrangeIcon = new Orange();
+  window.__GrayIcon   = new Gray();
 })();
 </script>
 
@@ -116,10 +146,11 @@ const trackLine=L.polyline([], {color:'#ef4444',weight:5}).addTo(map);
 const checkpointLayer=L.layerGroup().addTo(map);
 
 /* ====== 状態・DOM ====== */
-let lastLatLng=null, tracking=false, watchId=null, pulseTimer=null, startupSweepTimer=null;
+let lastLatLng=null, prevLatLng=null, tracking=false, watchId=null, pulseTimer=null, startupSweepTimer=null;
 let notifyMeters=100;
 let routeLayer=null;
-const routePointLayers=[];
+const routePointLayers=[];        // 読み上げ対象ポイントのみ
+const genericPointLayers=[];      // ルート汎用ピン（表示のみ・読み上げ対象外）
 
 const $file=document.getElementById('file'),$clear=document.getElementById('clear'),$fname=document.getElementById('fname');
 const $track=document.getElementById('track'),$stop=document.getElementById('stop');
@@ -128,6 +159,19 @@ const $chk=document.getElementById('checkpoint'),$memo=document.getElementById('
 const $th=document.getElementById('th'),$thv=document.getElementById('thv'),$stat=document.getElementById('stat');
 const $recBadge=document.getElementById('recBadge'),$toast=document.getElementById('toast');
 const $keepAwake=document.getElementById('keepAwake');
+const $keepCentered=document.getElementById('keepCentered');
+const $compass=document.getElementById('compass'); const $compassArrow=document.getElementById('compassArrow');
+let orientationMode='north'; // 'north' | 'course'
+document.querySelectorAll('input[name=orient]').forEach(r=>{
+  r.addEventListener('change',()=>{
+    orientationMode=r.value;
+    if(orientationMode==='north'){
+      rotateMap(0); $compass.style.display='none';
+    }else{
+      $compass.style.display='grid';
+    }
+  });
+});
 
 /* ====== 音声（iOS安定化）＋キュー（onend連結） ====== */
 let voiceReady=false, audioCtx=null;
@@ -140,8 +184,7 @@ function speakQueued(text, next){
     const u=new SpeechSynthesisUtterance(String(text));
     u.lang='ja-JP'; u.rate=0.85; u.pitch=1; u.volume=1;
     const vs=speechSynthesis.getVoices?.()||[];
-    const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja'));
-    if(ja) u.voice=ja;
+    const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja')); if(ja) u.voice=ja;
     let settled=false; const proceed=()=>{ if(settled) return; settled=true; next?.(); };
     const timeoutMs = Math.max(1600, Math.min(8000, text.length*180));
     const to = setTimeout(proceed, timeoutMs);
@@ -177,7 +220,7 @@ async function disableWakeLock(){ try{ await wakeLock?.release(); }catch(_){}
 document.addEventListener('visibilitychange', ()=> { if (document.visibilityState === 'visible' && wakeLock) enableWakeLock(); });
 $keepAwake.onclick = ()=> { if (wakeLock) disableWakeLock(); else enableWakeLock(); };
 
-/* ====== My Maps の description/ExtendedData から“メモ”抽出 ====== */
+/* ====== メモ抽出（MyMapsのdescription/ExtendedData等） ====== */
 function stripHtml(x){ if (!x) return ''; const div=document.createElement('div'); div.innerHTML=String(x); return (div.textContent||div.innerText||'').replace(/\s+/g,' ').trim(); }
 function firstNonEmpty(arr){ for(const v of arr){ if(v!=null && String(v).trim()!=='') return v; } return ''; }
 function extractMemo(props){
@@ -196,8 +239,8 @@ function extractMemo(props){
 }
 
 /* ====== KML/KMZ 読み込み ====== */
-function clearRoute(){ if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; } routePointLayers.length=0; $fname.textContent='（未選択）'; }
-$clear.onclick=clearRoute;
+function clearRoute(){ if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; } routePointLayers.length=0; genericPointLayers.length=0; $fname.textContent='（未選択）'; }
+document.getElementById('clear').onclick=clearRoute;
 
 $file.addEventListener('change', async (ev)=>{
   const f=ev.target.files?.[0]; if(!f) return; $fname.textContent=f.name;
@@ -220,27 +263,26 @@ $file.addEventListener('change', async (ev)=>{
     routeLayer=L.geoJSON(gj,{
       style:{color:'#1d4ed8',weight:4},
 
-      /* ★ Point の採用判定（ここでルート用ピンを弾く） */
-      filter:(feature)=>{
-        if(!feature || !feature.geometry) return false;
-        if(feature.geometry.type!=='Point') return true; // LineString/Polygon は通す（線は描画）
-        const props = feature.properties || {};
+      /* Pointを分類：採用（青）/ 汎用（灰） */
+      pointToLayer:(feat,latlng)=>{
+        const props = feat.properties || {};
         const name  = (props.name || props.Name || '').trim();
         const memo  = extractMemo(props).trim();
         const generic = /^(point|ポイント|経由地|waypoint|via)(?:[\s\-_\d]*)$/i.test(name);
-        // 採用条件：メモがある、または（名前があり かつ 汎用名ではない）
-        return !!( memo || (name && !generic) );
-      },
 
-      pointToLayer:(feat,latlng)=>{
-        const props = feat.properties || {};
-        const name  = props.name || props.Name || '';
-        const memo  = extractMemo(props);
-        const popup = (name||memo)? [name,memo].filter(Boolean).join('<br>') : 'ポイント';
-        const m=L.marker(latlng,{icon:window.__BlueIcon}).bindPopup(popup); // KMLの採用ポイント＝青
+        const isMeaningful = !!( memo || (name && !generic) );
+        const icon = isMeaningful ? window.__BlueIcon : window.__GrayIcon;
+        const popup = (name||memo)? [name,memo].filter(Boolean).join('<br>') : (generic?'ルート用ピン':'ポイント');
+
+        const m=L.marker(latlng,{icon}).bindPopup(popup);
         m.feature={properties:{name, memo}};
         m._announced=false; m._lastDist=Infinity;
-        routePointLayers.push(m); // 読み上げ候補
+
+        if(isMeaningful){
+          routePointLayers.push(m);   // ← 読み上げ対象
+        }else{
+          genericPointLayers.push(m); // ← 表示のみ
+        }
         return m;
       }
     }).addTo(map);
@@ -250,9 +292,9 @@ $file.addEventListener('change', async (ev)=>{
   }catch(e){ alert('ファイル読込に失敗：'+(e?.message||e)); }
 });
 
-/* ====== 判定：半径内を距離順で読む ====== */
+/* ====== 判定：半径内を距離順で読む（意味のあるポイント＋手動CPのみ） ====== */
 function collectNearTexts(here){
-  const list=[...routePointLayers, ...Object.values(checkpointLayer._layers||{})];
+  const list=[...routePointLayers, ...Object.values(checkpointLayer._layers||{})]; // 汎用ルートピンは含めない
   const hits=[];
   for(const layer of list){
     if(!layer?.getLatLng || layer._announced) continue;
@@ -277,6 +319,24 @@ function checkNearAndSpeak(here){
   if(texts.length) enqueueSpeech(texts);
 }
 
+/* ====== 進行方向（方位）と地図回転 ====== */
+let currentBearing=0; // 0 = 北上
+function bearingBetween(a,b){
+  const toRad=d=>d*Math.PI/180, toDeg=r=>r*180/Math.PI;
+  const lat1=toRad(a.lat), lon1=toRad(a.lng), lat2=toRad(b.lat), lon2=toRad(b.lng);
+  const y=Math.sin(lon2-lon1)*Math.cos(lat2);
+  const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(lon2-lon1);
+  let brng=(toDeg(Math.atan2(y,x))+360)%360;
+  return brng;
+}
+function rotateMap(bearingDeg){
+  // Leaflet本体は回転非対応なので、画面をCSSで回す（見た目上の回転）
+  const pane = map.getPanes().mapPane; // .leaflet-map-pane
+  pane.style.transform = `rotate(${-bearingDeg}deg)`;
+  // コンパスの矢印は北を指すので、地図に合わせて逆回転は不要。進行方向を上にするときは矢印は bearing に回す
+  $compassArrow.style.transform = `rotate(${bearingDeg}deg)`;
+}
+
 /* ====== UI操作 ====== */
 document.getElementById('tts').onclick=()=>{ unlockTTS(); enqueueSpeech(['テストです']); };
 $th.oninput=()=>{ notifyMeters=+$th.value; $thv.textContent=`${notifyMeters}m`; };
@@ -298,8 +358,11 @@ $track.onclick=()=>{
 
   if(navigator.geolocation){
     navigator.geolocation.getCurrentPosition(pos=>{
-      lastLatLng=[pos.coords.latitude,pos.coords.longitude];
-      me.setLatLng(lastLatLng); map.setView(lastLatLng,16);
+      const ll=[pos.coords.latitude,pos.coords.longitude];
+      prevLatLng=lastLatLng? L.latLng(lastLatLng): null;
+      lastLatLng=ll;
+      me.setLatLng(lastLatLng);
+      map.setView(lastLatLng,16);
       checkNearAndSpeak(L.latLng(lastLatLng));
     },()=>{}, {enableHighAccuracy:true,timeout:8000});
   }
@@ -312,9 +375,29 @@ $track.onclick=()=>{
   },2000);
 
   watchId=navigator.geolocation.watchPosition(pos=>{
+    prevLatLng = lastLatLng? L.latLng(lastLatLng): null;
     lastLatLng=[pos.coords.latitude,pos.coords.longitude];
-    me.setLatLng(lastLatLng); trackLine.addLatLng(lastLatLng);
-    checkNearAndSpeak(L.latLng(lastLatLng));
+    const here=L.latLng(lastLatLng);
+    me.setLatLng(here);
+    trackLine.addLatLng(here);
+
+    // 進行方向（優先：端末の heading、無ければ移動ベクトルから計算）
+    let bearing = (typeof pos.coords.heading==='number' && !isNaN(pos.coords.heading)) ? pos.coords.heading : (prevLatLng? bearingBetween(prevLatLng, here): currentBearing);
+    currentBearing = bearing;
+
+    if(orientationMode==='course'){
+      rotateMap(bearing);
+      $compass.style.display='grid';
+    }else{
+      rotateMap(0);
+      $compass.style.display='none';
+    }
+
+    if($keepCentered.checked){
+      map.setView(here, map.getZoom(), {animate:false});
+    }
+
+    checkNearAndSpeak(here);
   },err=>{ $stat.textContent=`位置エラー: ${err.message}`; },
   {enableHighAccuracy:true,maximumAge:1000,timeout:10000});
 };
@@ -329,6 +412,9 @@ $stop.onclick=()=>{
   $track.disabled=false; $stop.disabled=true;
   $recBadge.style.display='none'; stopPulse();
 
+  // 地図回転をリセット
+  rotateMap(0); $compass.style.display='none';
+
   unlockTTS();
   enqueueSpeech(['評価を終了します']);
 };
@@ -340,7 +426,7 @@ $chk.onclick=()=>{
   m.feature={properties:{name:'チェックポイント', memo:memo||''}};
   m.bindPopup(memo?`<b>CP</b><br>${memo}`:"<b>CP</b>");
   m._announced=false; m._lastDist=Infinity;
-  checkNearAndSpeak(L.latLng(lastLatLng));
+  checkNearAndSpeak(L.latLng(lastLatLng)); // 追加直後に半径内なら読む
 };
 
 $rec.onclick=()=>{ if(lastLatLng) map.setView(lastLatLng,16); };
