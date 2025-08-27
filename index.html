@@ -8,7 +8,6 @@
 <style>
   html,body,#map{height:100%;margin:0}
   #map{background:#f2f2f2}
-  /* カードUI */
   #panel{
     position:absolute;left:10px;top:10px;z-index:1000;
     background:#fff;padding:10px 12px;border-radius:14px;
@@ -25,14 +24,12 @@
   #recenter{background:#0ea5e9;color:#fff;border-color:#0ea5e9}
   #checkpoint{background:#f59e0b;color:#fff;border-color:#f59e0b}
   #export{background:#6366f1;color:#fff;border-color:#6366f1}
-  /* 右下の現在地ボタン */
   #fab-recenter{
     position:absolute;right:14px;bottom:14px;z-index:1000;
     width:50px;height:50px;border-radius:50%;
     display:grid;place-items:center;background:#0ea5e9;color:#fff;
     font-size:20px;border:none;box-shadow:0 6px 24px rgba(0,0,0,.18)
   }
-  /* 追跡中バッジ */
   #recBadge{
     position:absolute;right:12px;top:12px;z-index:1001;display:none;align-items:center;gap:6px;
     background:rgba(239,68,68,.95);color:#fff;padding:6px 10px;border-radius:9999px;
@@ -40,7 +37,6 @@
   }
   .dot{width:10px;height:10px;border-radius:50%;background:#fff;animation:blink 1s infinite}
   @keyframes blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
-  /* トースト */
   #toast{
     position:absolute;left:50%;bottom:78px;transform:translateX(-50%);
     z-index:1002;display:none;max-width:min(92vw,520px);
@@ -58,7 +54,6 @@
   <h1>実車評価支援ツール</h1>
 
   <div class="row">
-    <!-- Safariでも確実に出る素のinput -->
     <input id="file" type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" />
     <button id="clear">クリア</button>
     <span id="fname" class="small">（未選択）</span>
@@ -95,16 +90,14 @@
 
 <script src="leaflet.js"></script>
 
-<!-- 画像不要のSVGピン：青（ルート点）／オレンジ（手動CP） -->
+<!-- ピン：青（KMLの“ポイント”）／オレンジ（手動CP） -->
 <script>
 (function(){
   const blueSVG = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#2A7FFF"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);
   const orangeSVG = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#F59E0B"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);
   const BlueIcon   = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${blueSVG}`,   iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
   const OrangeIcon = L.Icon.extend({options:{iconUrl:`data:image/svg+xml;charset=UTF-8,${orangeSVG}`, iconSize:[24,36],iconAnchor:[12,34],popupAnchor:[0,-30]}});
-  // 既定は「青」
   L.Marker.prototype.options.icon = new BlueIcon();
-  // グローバルに使うため公開
   window.__BlueIcon   = new BlueIcon();
   window.__OrangeIcon = new OrangeIcon();
 })();
@@ -122,9 +115,9 @@ const me=L.circleMarker([35,135],{radius:7,color:'#0ea5e9',fillOpacity:0.7,weigh
 const trackLine=L.polyline([], {color:'#ef4444',weight:5}).addTo(map);
 const checkpointLayer=L.layerGroup().addTo(map);
 
-/* ====== 状態・DOM（※ここで一度だけ宣言） ====== */
+/* ====== 状態・DOM ====== */
 let lastLatLng=null, tracking=false, watchId=null, pulseTimer=null, startupSweepTimer=null;
-let notifyMeters=100;                 // ← 二重に宣言しない
+let notifyMeters=100;
 let routeLayer=null;
 const routePointLayers=[];
 
@@ -141,8 +134,6 @@ let voiceReady=false, audioCtx=null;
 function getCtx(){ return audioCtx ||= new (window.AudioContext||window.webkitAudioContext)(); }
 function ensureAudio(){ try{ getCtx().resume(); }catch(_){} }
 function unlockTTS(){ try{ ensureAudio(); const c=getCtx(),o=c.createOscillator(),g=c.createGain(); g.gain.value=0.05; o.connect(g).connect(c.destination); const t=c.currentTime; o.start(t); o.stop(t+0.08); voiceReady=true; }catch(_){ } }
-
-/* onend で次に進む TTS */
 function speakQueued(text, next){
   if(!voiceReady) unlockTTS(); ensureAudio();
   try{
@@ -151,33 +142,19 @@ function speakQueued(text, next){
     const vs=speechSynthesis.getVoices?.()||[];
     const ja=vs.find(v=>(v.lang||'').toLowerCase().startsWith('ja'));
     if(ja) u.voice=ja;
-
-    let settled=false;
-    const proceed=()=>{ if(settled) return; settled=true; next?.(); };
+    let settled=false; const proceed=()=>{ if(settled) return; settled=true; next?.(); };
     const timeoutMs = Math.max(1600, Math.min(8000, text.length*180));
     const to = setTimeout(proceed, timeoutMs);
-
     u.onend = ()=>{ clearTimeout(to); proceed(); };
     u.onerror = ()=>{ clearTimeout(to); proceed(); };
-
     speechSynthesis.speak(u);
   }catch(_){ next?.(); }
 }
-
-/* ビープ＆トースト（可視化） */
 function beep(ms=140,f=880){ try{ ensureAudio(); const c=getCtx(),o=c.createOscillator(),g=c.createGain(); g.gain.setValueAtTime(0.08,c.currentTime); o.frequency.value=f; o.connect(g).connect(c.destination); o.start(); o.stop(c.currentTime+ms/1000); }catch(_){ } }
 let toastTimer=null; function toast(msg){ $toast.textContent=msg; $toast.style.display='block'; clearTimeout(toastTimer); toastTimer=setTimeout(()=>{$toast.style.display='none';},2200); }
-
-/* 発話キュー（onend 連結版） */
 let q=[]; let playing=false;
 function enqueueSpeech(items){ if(!items||!items.length) return; q.push(...items); if(!playing) playNext(); }
-function playNext(){
-  if(!q.length){ playing=false; return; }
-  playing=true;
-  const text=q.shift();
-  toast(text); beep(130,880);
-  speakQueued(text, ()=>{ setTimeout(playNext, 120); });
-}
+function playNext(){ if(!q.length){ playing=false; return; } playing=true; const text=q.shift(); toast(text); beep(130,880); speakQueued(text, ()=>{ setTimeout(playNext, 120); }); }
 
 /* ====== Wake Lock（画面スリープ防止） ====== */
 let wakeLock = null;
@@ -195,61 +172,26 @@ async function enableWakeLock(){
     alert('Wake Lock を取得できませんでした。iPhone側の自動ロックを「しない」にしてください。');
   }
 }
-async function disableWakeLock(){
-  try{ await wakeLock?.release(); }catch(_){}
-  wakeLock = null;
-  $keepAwake.textContent = '画面スリープ防止: OFF';
-}
-document.addEventListener('visibilitychange', ()=> {
-  if (document.visibilityState === 'visible' && wakeLock) enableWakeLock();
-});
+async function disableWakeLock(){ try{ await wakeLock?.release(); }catch(_){}
+  wakeLock = null; $keepAwake.textContent = '画面スリープ防止: OFF'; }
+document.addEventListener('visibilitychange', ()=> { if (document.visibilityState === 'visible' && wakeLock) enableWakeLock(); });
 $keepAwake.onclick = ()=> { if (wakeLock) disableWakeLock(); else enableWakeLock(); };
 
 /* ====== My Maps の description/ExtendedData から“メモ”抽出 ====== */
-function stripHtml(x){
-  if (!x) return '';
-  const div=document.createElement('div'); div.innerHTML=String(x);
-  return (div.textContent||div.innerText||'').replace(/\s+/g,' ').trim();
-}
+function stripHtml(x){ if (!x) return ''; const div=document.createElement('div'); div.innerHTML=String(x); return (div.textContent||div.innerText||'').replace(/\s+/g,' ').trim(); }
 function firstNonEmpty(arr){ for(const v of arr){ if(v!=null && String(v).trim()!=='') return v; } return ''; }
 function extractMemo(props){
   if(!props || typeof props!=='object') return '';
-  // 1) 直接の候補
-  const direct = firstNonEmpty([
-    props.memo, props.Memo,
-    props.description, props.Description,
-    props.snippet, props.Snippet,
-    props.note, props.Note,
-    props['メモ'], props['説明'], props['概要']
-  ]);
+  const direct = firstNonEmpty([props.memo, props.Memo, props.description, props.Description, props.snippet, props.Snippet, props.note, props.Note, props['メモ'], props['説明'], props['概要']]);
   if (direct) return stripHtml(direct);
-  // 2) ExtendedData 各種
   const ed = props.ExtendedData || props.extendedData || props.extendeddata || {};
-  try{
-    const arr = Array.isArray(ed.Data)? ed.Data : Array.isArray(ed.data)? ed.data : null;
-    if (arr) for(const item of arr){
-      const k=item?.name||item?.Name||''; const v=item?.value||item?.Value||'';
-      if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v);
-    }
-  }catch(_){}
-  try{
-    const sds = ed.SchemaData || ed.schemadata || [];
-    for(const s of (Array.isArray(sds)?sds:[sds])){
-      const sims = s?.SimpleData || s?.simpledata || [];
-      for(const sd of (Array.isArray(sims)?sims:[sims])){
-        const k=sd?.name||sd?.Name||''; const v=sd?._text||sd?.text||sd?.value||'';
-        if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v);
-      }
-    }
-  }catch(_){}
-  try{
-    for(const k of Object.keys(ed)){
-      const v=ed[k];
-      if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v);
-    }
-  }catch(_){}
-  const htmlish = firstNonEmpty([props.descriptionHtml, props.balloonText, props.BalloonText]);
-  if (htmlish) return stripHtml(htmlish);
+  try{ const arr = Array.isArray(ed.Data)? ed.Data : Array.isArray(ed.data)? ed.data : null;
+    if (arr) for(const item of arr){ const k=item?.name||item?.Name||''; const v=item?.value||item?.Value||''; if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v); } }catch(_){}
+  try{ const sds = ed.SchemaData || ed.schemadata || [];
+    for(const s of (Array.isArray(sds)?sds:[sds])){ const sims = s?.SimpleData || s?.simpledata || [];
+      for(const sd of (Array.isArray(sims)?sims:[sims])){ const k=sd?.name||sd?.Name||''; const v=sd?._text||sd?.text||sd?.value||''; if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v); } } }catch(_){}
+  try{ for(const k of Object.keys(ed)){ const v=ed[k]; if(/desc|memo|note|説明|概要/i.test(k)&&stripHtml(v)) return stripHtml(v); } }catch(_){}
+  const htmlish = firstNonEmpty([props.descriptionHtml, props.balloonText, props.BalloonText]); if (htmlish) return stripHtml(htmlish);
   return '';
 }
 
@@ -266,7 +208,7 @@ $file.addEventListener('change', async (ev)=>{
       const zip=await JSZip.loadAsync(buf);
       const ent=Object.values(zip.files).find(z=>z.name.toLowerCase().endsWith('.kml'));
       if(!ent){ alert('KMZ内にKMLがありません'); return; }
-      kmlText=await ent.async('string'); // iOSはstringが安定
+      kmlText=await ent.async('string');
     }else{
       kmlText=await f.text();
     }
@@ -274,23 +216,35 @@ $file.addEventListener('change', async (ev)=>{
     const gj=toGeoJSON.kml(dom);
 
     if(routeLayer) map.removeLayer(routeLayer);
+
     routeLayer=L.geoJSON(gj,{
       style:{color:'#1d4ed8',weight:4},
+
+      /* ★ ここが重要：Pointのうち “名前もメモも空” は完全スキップ（= ルート線の頂点などは除外） */
+      filter:(feature)=>{
+        if(!feature || !feature.geometry) return false;
+        if(feature.geometry.type!=='Point') return true; // LineString/Polygon等はそのまま通す
+        const props = feature.properties || {};
+        const name  = (props.name || props.Name || '').trim();
+        const memo  = extractMemo(props).trim();
+        return !!(name || memo); // ← 名前かメモがあるPointだけ通す＝ユーザーが打ったポイントのみ
+      },
+
       pointToLayer:(feat,latlng)=>{
         const props = feat.properties || {};
         const name  = props.name || props.Name || '';
         const memo  = extractMemo(props);
         const popup = (name||memo)? [name,memo].filter(Boolean).join('<br>') : 'ポイント';
-        const m=L.marker(latlng,{icon:window.__BlueIcon}).bindPopup(popup); // ルート点=青
-        m.feature={properties:{name, memo}};  // ← 読み上げ用に格納
+        const m=L.marker(latlng,{icon:window.__BlueIcon}).bindPopup(popup); // KMLのポイント＝青
+        m.feature={properties:{name, memo}};
         m._announced=false; m._lastDist=Infinity;
-        routePointLayers.push(m);
+        routePointLayers.push(m); // 読み上げ候補にも登録
         return m;
       }
     }).addTo(map);
 
     try{ map.fitBounds(routeLayer.getBounds(),{padding:[20,20]}); }catch(_){}
-    if(tracking && lastLatLng) checkNearAndSpeak(L.latLng(lastLatLng)); // 追跡中は即判定
+    if(tracking && lastLatLng) checkNearAndSpeak(L.latLng(lastLatLng));
   }catch(e){ alert('ファイル読込に失敗：'+(e?.message||e)); }
 });
 
@@ -334,14 +288,12 @@ $track.onclick=()=>{
   $recBadge.style.display='flex'; startPulse();
   trackLine.setLatLngs([]); checkpointLayer.clearLayers();
 
-  // 1) まず「評価を開始します」→ 2) その後に近傍ポイント
   enqueueSpeech(['評価を開始します']);
   if(lastLatLng){
     const texts=collectNearTexts(L.latLng(lastLatLng));
     if(texts.length) enqueueSpeech(texts);
   }
 
-  // 即時測位（許可プロンプト & その場判定）
   if(navigator.geolocation){
     navigator.geolocation.getCurrentPosition(pos=>{
       lastLatLng=[pos.coords.latitude,pos.coords.longitude];
@@ -350,7 +302,6 @@ $track.onclick=()=>{
     },()=>{}, {enableHighAccuracy:true,timeout:8000});
   }
 
-  // 開始直後 20秒は2秒おきに再チェック（周辺密集対策）
   let sweep=0; clearInterval(startupSweepTimer);
   startupSweepTimer=setInterval(()=>{
     if(!tracking){ clearInterval(startupSweepTimer); return; }
@@ -358,7 +309,6 @@ $track.onclick=()=>{
     if(++sweep>=10) clearInterval(startupSweepTimer);
   },2000);
 
-  // 通常追跡
   watchId=navigator.geolocation.watchPosition(pos=>{
     lastLatLng=[pos.coords.latitude,pos.coords.longitude];
     me.setLatLng(lastLatLng); trackLine.addLatLng(lastLatLng);
@@ -377,7 +327,6 @@ $stop.onclick=()=>{
   $track.disabled=false; $stop.disabled=true;
   $recBadge.style.display='none'; stopPulse();
 
-  // 停止時アナウンス
   unlockTTS();
   enqueueSpeech(['評価を終了します']);
 };
@@ -385,12 +334,11 @@ $stop.onclick=()=>{
 $chk.onclick=()=>{
   if(!lastLatLng){ alert("現在地が取得できていません"); return; }
   let memo=''; if($memo.checked) memo=prompt("メモ入力（任意）","");
-  // 手動チェックポイント：オレンジのピンで表示
   const m=L.marker(lastLatLng,{icon:window.__OrangeIcon}).addTo(checkpointLayer);
   m.feature={properties:{name:'チェックポイント', memo:memo||''}};
   m.bindPopup(memo?`<b>CP</b><br>${memo}`:"<b>CP</b>");
   m._announced=false; m._lastDist=Infinity;
-  checkNearAndSpeak(L.latLng(lastLatLng)); // 追加直後に半径内なら読む
+  checkNearAndSpeak(L.latLng(lastLatLng));
 };
 
 $rec.onclick=()=>{ if(lastLatLng) map.setView(lastLatLng,16); };
