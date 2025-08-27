@@ -87,6 +87,7 @@
 
   <div class="row">
     <button id="tts">音声テスト</button>
+    <button id="keepAwake">画面スリープ防止: OFF</button>
   </div>
 </div>
 
@@ -94,7 +95,7 @@
 
 <script src="leaflet.js"></script>
 
-<!-- 画像不要のSVGピン -->
+<!-- 画像不要のSVGピン（「？」対策） -->
 <script>
 (function(){
   const svg=encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#2A7FFF"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);
@@ -129,6 +130,7 @@ const $rec=document.getElementById('recenter'),$fab=document.getElementById('fab
 const $chk=document.getElementById('checkpoint'),$memo=document.getElementById('withMemo');
 const $th=document.getElementById('th'),$thv=document.getElementById('thv'),$stat=document.getElementById('stat');
 const $recBadge=document.getElementById('recBadge'),$toast=document.getElementById('toast');
+const $keepAwake=document.getElementById('keepAwake');
 
 /* ====== 音声（iOS安定化）＋キュー（onend連結） ====== */
 let voiceReady=false, audioCtx=null;
@@ -148,15 +150,11 @@ function speakQueued(text, next){
 
     let settled=false;
     const proceed=()=>{ if(settled) return; settled=true; next?.(); };
-    u.onend = proceed;
-    u.onerror = proceed;
-
-    // セーフティ：万が一 onend が来ない端末対策（長文でも十分な余裕）
     const timeoutMs = Math.max(1600, Math.min(8000, text.length*180));
     const to = setTimeout(proceed, timeoutMs);
-    const clearAll=()=>clearTimeout(to);
-    u.onend = (...a)=>{ clearAll(); proceed(...a); };
-    u.onerror = (...a)=>{ clearAll(); proceed(...a); };
+
+    u.onend = ()=>{ clearTimeout(to); proceed(); };
+    u.onerror = ()=>{ clearTimeout(to); proceed(); };
 
     speechSynthesis.speak(u);
   }catch(_){ next?.(); }
@@ -174,7 +172,38 @@ function playNext(){
   playing=true;
   const text=q.shift();
   toast(text); beep(130,880);
-  speakQueued(text, ()=>{ setTimeout(playNext, 120); }); // 終了後に少し間をあけて次
+  speakQueued(text, ()=>{ setTimeout(playNext, 120); });
+}
+
+/* ====== My Maps の description/ExtendedData からメモ抽出 ====== */
+function stripHtml(x){
+  if (!x) return '';
+  const div=document.createElement('div'); div.innerHTML=String(x);
+  return (div.textContent||div.innerText||'').trim();
+}
+function extractMemo(props){
+  // よくあるプロパティ
+  const cands = [
+    props.memo, props.description, props.Description,
+    props.snippet, props.Snippet, props.note, props.Note,
+    props['メモ'], props['説明'], props['概要']
+  ];
+  for (const v of cands){
+    const t = stripHtml(v);
+    if (t) return t;
+  }
+  // ExtendedData 風のフィールド
+  const ed = props.ExtendedData || props.extendedData || props.extendeddata || {};
+  try{
+    for (const k of Object.keys(ed)){
+      const val = ed[k];
+      if (val && /desc|memo|note|説明|概要/i.test(k)) {
+        const t = stripHtml(val);
+        if (t) return t;
+      }
+    }
+  }catch(_){}
+  return '';
 }
 
 /* ====== ファイル読込（KML/KMZ） ====== */
@@ -201,10 +230,15 @@ $file.addEventListener('change', async (ev)=>{
     routeLayer=L.geoJSON(gj,{
       style:{color:'#1d4ed8',weight:4},
       pointToLayer:(feat,latlng)=>{
-        const name=feat.properties?.name||feat.properties?.Name||'';
-        const m=L.marker(latlng).bindPopup(name||'ポイント');
-        m.feature={properties:{name}}; m._announced=false; m._lastDist=Infinity;
-        routePointLayers.push(m); return m;
+        const props = feat.properties || {};
+        const name  = props.name || props.Name || '';
+        const memo  = extractMemo(props);
+        const popup = (name||memo)? [name,memo].filter(Boolean).join('<br>') : 'ポイント';
+        const m=L.marker(latlng).bindPopup(popup);
+        m.feature={properties:{name, memo}};  // ← メモも保存
+        m._announced=false; m._lastDist=Infinity;
+        routePointLayers.push(m);
+        return m;
       }
     }).addTo(map);
 
@@ -222,9 +256,12 @@ function collectNearTexts(here){
     const dist=map.distance(here, layer.getLatLng());
     layer._lastDist=dist;
     const p=layer.feature?.properties||{};
-    const name=(p.name||'').trim(); const memo=(p.memo||'').trim();
+    const name=(p.name||'').trim();
+    const memo=(p.memo||'').trim();
     if(dist<=notifyMeters){
-      const text=(name||memo)?[name,memo].filter(Boolean).join('。'):'チェックポイント';
+      // 長すぎるメモは短縮（必要なら数値調整）
+      const memoShort = memo.length>80 ? memo.slice(0,80)+'…' : memo;
+      const text=(name||memoShort)?[name,memoShort].filter(Boolean).join('。'):'チェックポイント';
       hits.push({dist,text,layer});
     }
   }
@@ -252,7 +289,7 @@ $track.onclick=()=>{
   $recBadge.style.display='flex'; startPulse();
   trackLine.setLatLngs([]); checkpointLayer.clearLayers();
 
-  // 先に「評価を開始します」→終わってから近傍ポイント（onend連結）
+  // 1) まず「評価を開始します」→ 2) その後に近傍ポイント
   const afterStart=()=>{
     if(lastLatLng){
       const texts=collectNearTexts(L.latLng(lastLatLng));
@@ -260,8 +297,7 @@ $track.onclick=()=>{
     }
   };
   enqueueSpeech(['評価を開始します']);
-  // onend に合わせて afterStart が走るよう、キュー末尾に入れる
-  // （上の playNext は終了ごとに次を読む仕組みなので、この順でOK）
+  // afterStart は collectNearTexts 呼び出しで自然にキューへ入る想定
 
   // 即時測位（許可プロンプト & その場判定もキューへ）
   if(navigator.geolocation){
@@ -287,6 +323,9 @@ $track.onclick=()=>{
     checkNearAndSpeak(L.latLng(lastLatLng));
   },err=>{ $stat.textContent=`位置エラー: ${err.message}`; },
   {enableHighAccuracy:true,maximumAge:1000,timeout:10000});
+
+  // 追跡開始時に自動で画面スリープ防止ONにしたい場合は次の1行を有効化
+  // enableWakeLock();
 };
 
 $stop.onclick=()=>{
@@ -316,6 +355,33 @@ $chk.onclick=()=>{
 
 $rec.onclick=()=>{ if(lastLatLng) map.setView(lastLatLng,16); };
 $fab.onclick=()=>$rec.click();
+
+/* ====== 画面スリープ防止（Wake Lock） ====== */
+let wakeLock = null;
+async function enableWakeLock(){
+  try{
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      $keepAwake.textContent = '画面スリープ防止: ON';
+      wakeLock.addEventListener('release', ()=> { $keepAwake.textContent = '画面スリープ防止: OFF'; });
+    } else {
+      alert('端末が Wake Lock に未対応です。iPhone側の自動ロックを「しない」に設定してください。');
+    }
+  }catch(e){
+    console.warn('WakeLock error:', e);
+    alert('Wake Lock を取得できませんでした。iPhone側の自動ロックを「しない」にしてください。');
+  }
+}
+async function disableWakeLock(){
+  try{ await wakeLock?.release(); }catch(_){}
+  wakeLock = null;
+  $keepAwake.textContent = '画面スリープ防止: OFF';
+}
+document.addEventListener('visibilitychange', ()=> {
+  // 復帰時に取り直し（iOSで切れることがある対策）
+  if (document.visibilityState === 'visible' && wakeLock) enableWakeLock();
+});
+$keepAwake.onclick = ()=> { if (wakeLock) disableWakeLock(); else enableWakeLock(); };
 
 /* ====== 演出 ====== */
 function startPulse(){ let up=true; pulseTimer=setInterval(()=>{ let r=me.options.radius; r=up?Math.min(11,r+0.5):Math.max(7,r-0.5); me.setStyle({radius:r}); if(r>=11)up=false; if(r<=7)up=true; },80); }
