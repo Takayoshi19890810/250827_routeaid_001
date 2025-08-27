@@ -90,7 +90,7 @@
 
 <script src="leaflet.js"></script>
 
-<!-- ピン：青（KMLの“ポイント”）／オレンジ（手動CP） -->
+<!-- ピン：青（KMLの“採用ポイント”）／オレンジ（手動CP） -->
 <script>
 (function(){
   const blueSVG = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="#2A7FFF"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`);
@@ -220,14 +220,16 @@ $file.addEventListener('change', async (ev)=>{
     routeLayer=L.geoJSON(gj,{
       style:{color:'#1d4ed8',weight:4},
 
-      /* ★ ここが重要：Pointのうち “名前もメモも空” は完全スキップ（= ルート線の頂点などは除外） */
+      /* ★ Point の採用判定（ここでルート用ピンを弾く） */
       filter:(feature)=>{
         if(!feature || !feature.geometry) return false;
-        if(feature.geometry.type!=='Point') return true; // LineString/Polygon等はそのまま通す
+        if(feature.geometry.type!=='Point') return true; // LineString/Polygon は通す（線は描画）
         const props = feature.properties || {};
         const name  = (props.name || props.Name || '').trim();
         const memo  = extractMemo(props).trim();
-        return !!(name || memo); // ← 名前かメモがあるPointだけ通す＝ユーザーが打ったポイントのみ
+        const generic = /^(point|ポイント|経由地|waypoint|via)(?:[\s\-_\d]*)$/i.test(name);
+        // 採用条件：メモがある、または（名前があり かつ 汎用名ではない）
+        return !!( memo || (name && !generic) );
       },
 
       pointToLayer:(feat,latlng)=>{
@@ -235,10 +237,10 @@ $file.addEventListener('change', async (ev)=>{
         const name  = props.name || props.Name || '';
         const memo  = extractMemo(props);
         const popup = (name||memo)? [name,memo].filter(Boolean).join('<br>') : 'ポイント';
-        const m=L.marker(latlng,{icon:window.__BlueIcon}).bindPopup(popup); // KMLのポイント＝青
+        const m=L.marker(latlng,{icon:window.__BlueIcon}).bindPopup(popup); // KMLの採用ポイント＝青
         m.feature={properties:{name, memo}};
         m._announced=false; m._lastDist=Infinity;
-        routePointLayers.push(m); // 読み上げ候補にも登録
+        routePointLayers.push(m); // 読み上げ候補
         return m;
       }
     }).addTo(map);
