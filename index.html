@@ -7,7 +7,19 @@
   <link rel="stylesheet" href="./leaflet.css" />
   <style>
     html, body { height: 100%; margin: 0; }
-    $1
+    header { padding: .5rem .75rem; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; box-shadow: 0 1px 0 rgba(0,0,0,.08); }
+    header .title { font-weight: 700; margin-right: .5rem; }
+    header .sep { width: 1px; height: 24px; background: #e5e7eb; margin: 0 .25rem; }
+    header button, header input, header select, header label { font-size: 14px; }
+    header button { padding: .5rem .7rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff; cursor: pointer; }
+    header button.primary { background: #111827; color: white; border-color: #111827; }
+    header button.destructive { background: #dc2626; color: white; border-color: #dc2626; }
+    header button:disabled { opacity: .5; cursor: not-allowed; }
+    header .pill { padding: .35rem .6rem; border-radius: 999px; background: #f3f4f6; }
+    #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    #map { width: 100%; height: 100%; }
+    .stat { font-variant-numeric: tabular-nums; }
+    .toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); background: rgba(0,0,0,.85); color:#fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; z-index: 9999; }
     .status-pill { display:inline-flex; align-items:center; gap:6px; padding:.35rem .6rem; border-radius:999px; background:#f3f4f6;}
     .status-pill .dot { width:8px; height:8px; border-radius:999px; background:#9ca3af; }
     .status-running { background:#fee2e2; color:#b91c1c; }
@@ -17,13 +29,9 @@
     .status-stopped { background:#e5e7eb; color:#374151; }
     .status-idle { background:#f3f4f6; color:#374151; }
     @keyframes pulse { from { opacity:.6; transform: scale(1); } to { opacity:1; transform: scale(1.25);} }
-    #map { width: 100%; height: 100%; }
-    .stat { font-variant-numeric: tabular-nums; }
-    .toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); background: rgba(0,0,0,.85); color:#fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; z-index: 9999; }
   </style>
   <link rel="manifest" href="./manifest.webmanifest" />
   <script>
-    // PWA: SW登録（既存の sw.js をそのまま利用）
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js').catch(console.warn);
@@ -45,11 +53,11 @@
     <span class="sep"></span>
 
     <span class="pill stat">距離: <span id="dist">0.00</span> km</span>
-    $1
+    <span class="pill stat">ポイント: <span id="pts">0</span></span>
+    <span class="pill stat">経過: <span id="elapsed">00:00:00</span></span>
 
-    $1
-
-    <span class=\"pill stat\">時間: <span id=\"elapsed\">00:00:00</span></span>
+    <span id="runStatus" class="status-pill status-idle" title="追跡の状態">
+      <span class="dot"></span>
       <span id="runStatusText">待機中</span>
     </span>
 
@@ -76,8 +84,16 @@
   let distMeters = 0;
   let following = true; // 開始時は追従
 
+  // === バックアップ関連 ===
+  let autosaveTimer = null; // setInterval handle
+  const AUTOSAVE_MS = 5000; // 5秒ごとに自動保存
+  let idbDb = null;
+  const IDB_DB_NAME = 'route_aid';
+  const IDB_STORE = 'session';
+  const IDB_KEY = 'latest';
+
   // 保存先（File System Access API）
-  let dirHandle = null; // フォルダハンドル（権限付与済みならここに保持）
+  let dirHandle = null;
 
   // ====== 初期化 ======
   function init() {
@@ -87,7 +103,6 @@
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // 初期位置は日本中心あたり
     map.setView([35.681236, 139.767125], 13);
 
     trackLine = L.polyline([], { color: 'red', weight: 4, opacity: 0.9 }).addTo(map);
@@ -101,8 +116,10 @@
     document.getElementById('btnSaveGeoJSON').addEventListener('click', () => saveTrack('geojson'));
     document.getElementById('btnPickDir').addEventListener('click', pickDirectory);
 
-    // 既定ファイル名
     document.getElementById('fname').value = defaultFileName();
+
+    // IDB初期化と復元確認
+    initIDB().then(restoreFromBackup);
   }
 
   function toast(msg, ms = 1600) {
@@ -141,10 +158,12 @@
     if (elapsedTimer) clearInterval(elapsedTimer);
     elapsedTimer = setInterval(updateElapsed, 1000);
 
+    // 自動バックアップ開始＆初回保存
+    startAutosave();
+    idbPutState(buildSnapshot());
+
     setButtons({ running: true, paused: false });
     toast('評価を開始します（追跡開始）');
-    setRunStatus('running');
-    try { if (navigator.vibrate) navigator.vibrate(50); } catch(_){}
     setRunStatus('running');
     try { if (navigator.vibrate) navigator.vibrate(50); } catch(_){}
   }
@@ -153,14 +172,12 @@
     const { latitude: lat, longitude: lng } = pos.coords;
     const t = new Date();
 
-    // 末尾と距離計算
     const last = points.length ? points[points.length - 1] : null;
     const p = { lat, lng, t: t.toISOString() };
     points.push(p);
 
     if (last) distMeters += haversine(last.lat, last.lng, lat, lng);
 
-    // 描画更新
     trackLine.addLatLng([lat, lng]);
 
     if (!currentMarker) {
@@ -189,6 +206,7 @@
       setButtons({ running: false, paused: true });
       toast('一時停止');
       setRunStatus('paused');
+      idbPutState(buildSnapshot());
     }
   }
 
@@ -214,6 +232,8 @@
     setButtons({ running: false, paused: false, stopped: true });
     toast('停止しました。保存できます');
     setRunStatus('stopped');
+    stopAutosave();
+    idbPutState(buildSnapshot());
     try { if (navigator.vibrate) navigator.vibrate([30,40,30]); } catch(_){}
   }
 
@@ -232,7 +252,6 @@
     } else if (state.stopped) {
       start.disabled = false; pause.disabled = true; resume.disabled = true; stopB.disabled = true; saveG.disabled = false; saveJ.disabled = false;
     } else {
-      // 初期
       start.disabled = false; pause.disabled = true; resume.disabled = true; stopB.disabled = true; saveG.disabled = true; saveJ.disabled = true;
     }
   }
@@ -241,6 +260,76 @@
     document.getElementById('pts').textContent = String(points.length);
     document.getElementById('dist').textContent = (distMeters / 1000).toFixed(2);
   }
+
+  // ====== IndexedDB（自動バックアップ） ======
+  function initIDB(){
+    return new Promise((resolve) => {
+      const req = indexedDB.open(IDB_DB_NAME, 1);
+      req.onupgradeneeded = (e)=>{
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+      };
+      req.onsuccess = (e)=>{ idbDb = e.target.result; resolve(); };
+      req.onerror = ()=>{ console.warn('IDB open error'); resolve(); };
+    });
+  }
+  function idbPutState(state){
+    try{
+      if(!idbDb) return;
+      const tx = idbDb.transaction([IDB_STORE], 'readwrite');
+      tx.objectStore(IDB_STORE).put(state, IDB_KEY);
+    }catch(err){ console.warn('IDB put error', err); }
+  }
+  function idbGetState(){
+    return new Promise(resolve=>{
+      if(!idbDb) return resolve(null);
+      const tx = idbDb.transaction([IDB_STORE], 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+      req.onsuccess = ()=> resolve(req.result || null);
+      req.onerror = ()=> resolve(null);
+    });
+  }
+  function idbClear(){
+    try{
+      if(!idbDb) return;
+      const tx = idbDb.transaction([IDB_STORE], 'readwrite');
+      tx.objectStore(IDB_STORE).delete(IDB_KEY);
+    }catch(err){ console.warn('IDB clear error', err); }
+  }
+  function buildSnapshot(){
+    return {
+      ts: Date.now(),
+      points,
+      distMeters,
+      startTime: startTime ? startTime.toISOString() : null
+    };
+  }
+  async function restoreFromBackup(){
+    const snap = await idbGetState();
+    if(!snap || !Array.isArray(snap.points) || snap.points.length === 0) return;
+    if(!confirm('前回の未保存データを復元しますか？')) return;
+    points = snap.points;
+    distMeters = snap.distMeters || 0;
+    trackLine.setLatLngs(points.map(p=>[p.lat, p.lng]));
+    const last = points[points.length-1];
+    if(last){
+      if (!currentMarker) currentMarker = L.marker([last.lat, last.lng]).addTo(map);
+      else currentMarker.setLatLng([last.lat, last.lng]);
+      map.setView([last.lat, last.lng], Math.max(map.getZoom(), 16), { animate:false });
+    }
+    updateStats();
+    toast('バックアップから復元しました');
+  }
+  function startAutosave(){
+    if (autosaveTimer) clearInterval(autosaveTimer);
+    autosaveTimer = setInterval(()=> idbPutState(buildSnapshot()), AUTOSAVE_MS);
+  }
+  function stopAutosave(){
+    if (autosaveTimer){ clearInterval(autosaveTimer); autosaveTimer=null; }
+  }
+  window.addEventListener('beforeunload', ()=>{
+    idbPutState(buildSnapshot());
+  });
 
   // ====== 保存処理 ======
   async function saveTrack(fmt) {
@@ -262,7 +351,6 @@
         await writable.close();
         toast(`保存しました: ${filename}`);
       } else {
-        // Fallback: 通常のダウンロード
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([dataStr], { type: mime }));
         a.download = filename;
@@ -362,7 +450,6 @@
 
   // 起動
   init();
-  setRunStatus('idle');
   setRunStatus('idle');
 </script>
 </body>
