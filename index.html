@@ -7,19 +7,6 @@
   <link rel="stylesheet" href="./leaflet.css" />
   <style>
     html, body { height: 100%; margin: 0; }
-    header { padding: .5rem .75rem; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; box-shadow: 0 1px 0 rgba(0,0,0,.08); }
-    header .title { font-weight: 700; margin-right: .5rem; }
-    header .sep { width: 1px; height: 24px; background: #e5e7eb; margin: 0 .25rem; }
-    header button, header input, header select, header label { font-size: 14px; }
-    header button { padding: .5rem .7rem; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff; cursor: pointer; }
-    header button.primary { background: #111827; color: white; border-color: #111827; }
-    header button.destructive { background: #dc2626; color: white; border-color: #dc2626; }
-    header button:disabled { opacity: .5; cursor: not-allowed; }
-    header .pill { padding: .35rem .6rem; border-radius: 999px; background: #f3f4f6; }
-    #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
-    #map { width: 100%; height: 100%; }
-    .stat { font-variant-numeric: tabular-nums; }
-    .toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); background: rgba(0,0,0,.85); color:#fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; z-index: 9999; }
     .status-pill { display:inline-flex; align-items:center; gap:6px; padding:.35rem .6rem; border-radius:999px; background:#f3f4f6;}
     .status-pill .dot { width:8px; height:8px; border-radius:999px; background:#9ca3af; }
     .status-running { background:#fee2e2; color:#b91c1c; }
@@ -29,6 +16,9 @@
     .status-stopped { background:#e5e7eb; color:#374151; }
     .status-idle { background:#f3f4f6; color:#374151; }
     @keyframes pulse { from { opacity:.6; transform: scale(1); } to { opacity:1; transform: scale(1.25);} }
+    #map { width: 100%; height: 100%; }
+    .stat { font-variant-numeric: tabular-nums; }
+    .toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); background: rgba(0,0,0,.85); color:#fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; z-index: 9999; }
   </style>
   <link rel="manifest" href="./manifest.webmanifest" />
   <script>
@@ -75,39 +65,64 @@
 
 <script src="./leaflet.js"></script>
 <script>
-  // ====== 追跡・描画のコア状態 ======
-  let map, currentMarker, trackLine;
+  let map, currentMarker, trackLine, notifyCircle;
   let startTime = null;
   let elapsedTimer = null;
   let watchId = null;
-  let points = []; // {lat, lng, t}
+  let points = [];
   let distMeters = 0;
-  let following = true; // 開始時は追従
+  let following = true;
 
-  // === バックアップ関連 ===
-  let autosaveTimer = null; // setInterval handle
-  const AUTOSAVE_MS = 5000; // 5秒ごとに自動保存
-  let idbDb = null;
-  const IDB_DB_NAME = 'route_aid';
-  const IDB_STORE = 'session';
-  const IDB_KEY = 'latest';
-
-  // 保存先（File System Access API）
   let dirHandle = null;
 
-  // ====== 初期化 ======
+  // 簡易音声アナウンス
+  function speak(text){
+    try{
+      const u=new SpeechSynthesisUtterance(text);
+      u.lang='ja-JP';
+      speechSynthesis.speak(u);
+    }catch(e){console.warn('speech fail',e)}
+  }
+
+  // IndexedDB 簡易ラッパ
+  function openDB(){
+    return new Promise((res,rej)=>{
+      const req = indexedDB.open('RouteAidDB',1);
+      req.onupgradeneeded=e=>{e.target.result.createObjectStore('tracks');};
+      req.onsuccess=e=>res(e.target.result);
+      req.onerror=e=>rej(e);
+    });
+  }
+  async function saveBackup(){
+    try{
+      const db=await openDB();
+      const tx=db.transaction('tracks','readwrite');
+      tx.objectStore('tracks').put({points,distMeters,startTime},'current');
+    }catch(e){console.warn('backup failed',e)}
+  }
+  async function loadBackup(){
+    try{
+      const db=await openDB();
+      const tx=db.transaction('tracks','readonly');
+      const req=tx.objectStore('tracks').get('current');
+      return await new Promise(r=>{req.onsuccess=()=>r(req.result); req.onerror=()=>r(null);});
+    }catch(e){return null;}
+  }
+  async function clearBackup(){
+    const db=await openDB();
+    const tx=db.transaction('tracks','readwrite');
+    tx.objectStore('tracks').delete('current');
+  }
+
   function init() {
     map = L.map('map');
-    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
-
     map.setView([35.681236, 139.767125], 13);
-
     trackLine = L.polyline([], { color: 'red', weight: 4, opacity: 0.9 }).addTo(map);
 
-    // UIイベント
     document.getElementById('btnStart').addEventListener('click', startTracking);
     document.getElementById('btnPause').addEventListener('click', pauseTracking);
     document.getElementById('btnResume').addEventListener('click', resumeTracking);
@@ -118,8 +133,17 @@
 
     document.getElementById('fname').value = defaultFileName();
 
-    // IDB初期化と復元確認
-    initIDB().then(restoreFromBackup);
+    loadBackup().then(data=>{
+      if(data && data.points && data.points.length>0){
+        if(confirm('前回の追跡データがあります。復元しますか？')){
+          points=data.points; distMeters=data.distMeters; startTime=data.startTime?new Date(data.startTime):null;
+          trackLine.setLatLngs(points.map(p=>[p.lat,p.lng]));
+          updateStats();
+        } else {
+          clearBackup();
+        }
+      }
+    });
   }
 
   function toast(msg, ms = 1600) {
@@ -136,321 +160,88 @@
     return `Track_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   }
 
-  // ====== 追跡ロジック ======
   function startTracking() {
-    if (!('geolocation' in navigator)) { toast('この端末は位置情報に未対応です'); return; }
-
-    points = []; distMeters = 0;
-    updateStats();
-    trackLine.setLatLngs([]);
-
-    if (currentMarker) { currentMarker.remove(); }
-
-    const options = {
-      enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 20000
-    };
-
-    watchId = navigator.geolocation.watchPosition(onPos, onErr, options);
-
-    startTime = new Date();
-    if (elapsedTimer) clearInterval(elapsedTimer);
-    elapsedTimer = setInterval(updateElapsed, 1000);
-
-    // 自動バックアップ開始＆初回保存
-    startAutosave();
-    idbPutState(buildSnapshot());
-
-    setButtons({ running: true, paused: false });
+    if (!('geolocation' in navigator)) { toast('位置情報未対応'); return; }
+    points = []; distMeters = 0; updateStats(); trackLine.setLatLngs([]);
+    if (currentMarker) currentMarker.remove();
+    watchId = navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true,maximumAge:1000,timeout:20000});
+    startTime=new Date(); if(elapsedTimer) clearInterval(elapsedTimer); elapsedTimer=setInterval(updateElapsed,1000);
+    setButtons({ running:true }); setRunStatus('running');
     toast('評価を開始します（追跡開始）');
-    setRunStatus('running');
-    try { if (navigator.vibrate) navigator.vibrate(50); } catch(_){}
+    speak('これから評価開始します');
   }
 
-  function onPos(pos) {
-    const { latitude: lat, longitude: lng } = pos.coords;
-    const t = new Date();
-
-    const last = points.length ? points[points.length - 1] : null;
-    const p = { lat, lng, t: t.toISOString() };
-    points.push(p);
-
-    if (last) distMeters += haversine(last.lat, last.lng, lat, lng);
-
-    trackLine.addLatLng([lat, lng]);
-
-    if (!currentMarker) {
-      currentMarker = L.marker([lat, lng]).addTo(map);
-    } else {
-      currentMarker.setLatLng([lat, lng]);
-    }
-
-    if (following) {
-      map.setView([lat, lng], Math.max(map.getZoom(), 16), { animate: false });
-    }
-
+  function onPos(pos){
+    const {latitude:lat,longitude:lng}=pos.coords; const t=new Date();
+    const last=points.length?points[points.length-1]:null;
+    const p={lat,lng,t:t.toISOString()}; points.push(p);
+    if(last) distMeters+=haversine(last.lat,last.lng,lat,lng);
+    trackLine.addLatLng([lat,lng]);
+    if(!currentMarker) currentMarker=L.marker([lat,lng]).addTo(map); else currentMarker.setLatLng([lat,lng]);
+    if(following) map.setView([lat,lng],Math.max(map.getZoom(),16),{animate:false});
     updateStats();
+    saveBackup();
+
+    // 位置周囲の影
+    if(notifyCircle) notifyCircle.setLatLng([lat,lng]);
+    else notifyCircle=L.circle([lat,lng],{radius:200,fillColor:'blue',fillOpacity:0.15,stroke:false}).addTo(map);
   }
 
-  function onErr(err) {
-    console.warn('Geolocation error:', err);
-    toast('位置情報の取得に失敗しました');
+  function onErr(err){console.warn('Geolocation error:',err); toast('位置情報取得失敗');}
+
+  function pauseTracking(){ if(watchId!=null){navigator.geolocation.clearWatch(watchId); watchId=null; if(elapsedTimer) clearInterval(elapsedTimer); setButtons({paused:true}); setRunStatus('paused'); toast('一時停止'); saveBackup();} }
+
+  function resumeTracking(){ if(watchId==null){watchId=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:1000,timeout:20000}); if(!startTime) startTime=new Date(); if(elapsedTimer) clearInterval(elapsedTimer); elapsedTimer=setInterval(updateElapsed,1000); setButtons({running:true}); setRunStatus('running'); toast('追跡を再開'); saveBackup();} }
+
+  function stopTracking(){ if(watchId!=null){navigator.geolocation.clearWatch(watchId); watchId=null;} if(elapsedTimer){clearInterval(elapsedTimer); elapsedTimer=null;} setButtons({stopped:true}); setRunStatus('stopped'); toast('停止しました。保存できます'); clearBackup(); speak('評価を終了します。データを忘れずに保存してください'); }
+
+  function setButtons(state){
+    const s=document.getElementById('btnStart'),p=document.getElementById('btnPause'),r=document.getElementById('btnResume'),st=document.getElementById('btnStop'),g=document.getElementById('btnSaveGPX'),j=document.getElementById('btnSaveGeoJSON');
+    if(state.running){s.disabled=true;p.disabled=false;r.disabled=true;st.disabled=false;g.disabled=true;j.disabled=true;}
+    else if(state.paused){s.disabled=true;p.disabled=true;r.disabled=false;st.disabled=false;g.disabled=true;j.disabled=true;}
+    else if(state.stopped){s.disabled=false;p.disabled=true;r.disabled=true;st.disabled=true;g.disabled=false;j.disabled=false;}
+    else{s.disabled=false;p.disabled=true;r.disabled=true;st.disabled=true;g.disabled=true;j.disabled=true;}
   }
 
-  function pauseTracking() {
-    if (watchId != null) {
-      navigator.geolocation.clearWatch(watchId);
-      watchId = null;
-      if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer=null; }
-      setButtons({ running: false, paused: true });
-      toast('一時停止');
-      setRunStatus('paused');
-      idbPutState(buildSnapshot());
-    }
-  }
+  function updateStats(){document.getElementById('pts').textContent=String(points.length); document.getElementById('dist').textContent=(distMeters/1000).toFixed(2);}
 
-  function resumeTracking() {
-    if (watchId == null) {
-      const options = { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 };
-      watchId = navigator.geolocation.watchPosition(onPos, onErr, options);
-      if (!startTime) startTime=new Date();
-      if (elapsedTimer) clearInterval(elapsedTimer);
-      elapsedTimer=setInterval(updateElapsed,1000);
-      setButtons({ running: true, paused: false, resume: true });
-      toast('追跡を再開');
-      setRunStatus('running');
-    }
-  }
-
-  function stopTracking() {
-    if (watchId != null) {
-      navigator.geolocation.clearWatch(watchId);
-      watchId = null;
-    }
-    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer=null; }
-    setButtons({ running: false, paused: false, stopped: true });
-    toast('停止しました。保存できます');
-    setRunStatus('stopped');
-    stopAutosave();
-    idbPutState(buildSnapshot());
-    try { if (navigator.vibrate) navigator.vibrate([30,40,30]); } catch(_){}
-  }
-
-  function setButtons(state) {
-    const start = document.getElementById('btnStart');
-    const pause = document.getElementById('btnPause');
-    const resume = document.getElementById('btnResume');
-    const stopB = document.getElementById('btnStop');
-    const saveG = document.getElementById('btnSaveGPX');
-    const saveJ = document.getElementById('btnSaveGeoJSON');
-
-    if (state.running) {
-      start.disabled = true; pause.disabled = false; resume.disabled = true; stopB.disabled = false; saveG.disabled = true; saveJ.disabled = true;
-    } else if (state.paused) {
-      start.disabled = true; pause.disabled = true; resume.disabled = false; stopB.disabled = false; saveG.disabled = true; saveJ.disabled = true;
-    } else if (state.stopped) {
-      start.disabled = false; pause.disabled = true; resume.disabled = true; stopB.disabled = true; saveG.disabled = false; saveJ.disabled = false;
-    } else {
-      start.disabled = false; pause.disabled = true; resume.disabled = true; stopB.disabled = true; saveG.disabled = true; saveJ.disabled = true;
-    }
-  }
-
-  function updateStats() {
-    document.getElementById('pts').textContent = String(points.length);
-    document.getElementById('dist').textContent = (distMeters / 1000).toFixed(2);
-  }
-
-  // ====== IndexedDB（自動バックアップ） ======
-  function initIDB(){
-    return new Promise((resolve) => {
-      const req = indexedDB.open(IDB_DB_NAME, 1);
-      req.onupgradeneeded = (e)=>{
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
-      };
-      req.onsuccess = (e)=>{ idbDb = e.target.result; resolve(); };
-      req.onerror = ()=>{ console.warn('IDB open error'); resolve(); };
-    });
-  }
-  function idbPutState(state){
+  // ====== 音声合成・近接案内 ======
+  function speakJa(text){
     try{
-      if(!idbDb) return;
-      const tx = idbDb.transaction([IDB_STORE], 'readwrite');
-      tx.objectStore(IDB_STORE).put(state, IDB_KEY);
-    }catch(err){ console.warn('IDB put error', err); }
+      if(!('speechSynthesis' in window)) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'ja-JP';
+      u.rate = 0.95;
+      window.speechSynthesis.speak(u);
+    }catch(e){ console.warn('speech error', e); }
   }
-  function idbGetState(){
-    return new Promise(resolve=>{
-      if(!idbDb) return resolve(null);
-      const tx = idbDb.transaction([IDB_STORE], 'readonly');
-      const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
-      req.onsuccess = ()=> resolve(req.result || null);
-      req.onerror = ()=> resolve(null);
-    });
-  }
-  function idbClear(){
-    try{
-      if(!idbDb) return;
-      const tx = idbDb.transaction([IDB_STORE], 'readwrite');
-      tx.objectStore(IDB_STORE).delete(IDB_KEY);
-    }catch(err){ console.warn('IDB clear error', err); }
-  }
-  function buildSnapshot(){
-    return {
-      ts: Date.now(),
-      points,
-      distMeters,
-      startTime: startTime ? startTime.toISOString() : null
+  function announceNearbyWithinRadius(lat, lng, radius){
+    if (!POIS || !POIS.length) return;
+    const withD = POIS.map(o=>({ ...o, d: haversine(lat, lng, o.lat, o.lng) }))
+                      .filter(o=> o.d <= radius)
+                      .sort((a,b)=> a.d - b.d);
+    if (!withD.length) return;
+    let i=0;
+    const sayNext=()=>{
+      if(i>=withD.length) return;
+      const o=withD[i++];
+      const m = `${o.name || 'スポット'}、距離 ${Math.round(o.d)} メートル` + (o.note? `。メモ、${o.note}`: '');
+      speakJa(m);
+      setTimeout(sayNext, 1200);
     };
-  }
-  async function restoreFromBackup(){
-    const snap = await idbGetState();
-    if(!snap || !Array.isArray(snap.points) || snap.points.length === 0) return;
-    if(!confirm('前回の未保存データを復元しますか？')) return;
-    points = snap.points;
-    distMeters = snap.distMeters || 0;
-    trackLine.setLatLngs(points.map(p=>[p.lat, p.lng]));
-    const last = points[points.length-1];
-    if(last){
-      if (!currentMarker) currentMarker = L.marker([last.lat, last.lng]).addTo(map);
-      else currentMarker.setLatLng([last.lat, last.lng]);
-      map.setView([last.lat, last.lng], Math.max(map.getZoom(), 16), { animate:false });
-    }
-    updateStats();
-    toast('バックアップから復元しました');
-  }
-  function startAutosave(){
-    if (autosaveTimer) clearInterval(autosaveTimer);
-    autosaveTimer = setInterval(()=> idbPutState(buildSnapshot()), AUTOSAVE_MS);
-  }
-  function stopAutosave(){
-    if (autosaveTimer){ clearInterval(autosaveTimer); autosaveTimer=null; }
-  }
-  window.addEventListener('beforeunload', ()=>{
-    idbPutState(buildSnapshot());
-  });
-
-  // ====== 保存処理 ======
-  async function saveTrack(fmt) {
-    if (points.length < 2) { toast('保存できる軌跡がありません'); return; }
-
-    const nameRaw = (document.getElementById('fname').value || defaultFileName()).trim();
-    const safe = nameRaw.replace(/[^\w\-_.]/g, '_');
-    const filename = fmt === 'gpx' ? `${safe}.gpx` : `${safe}.geojson`;
-
-    try {
-      let dataStr, mime;
-      if (fmt === 'gpx') { dataStr = buildGPX(points); mime = 'application/gpx+xml'; }
-      else { dataStr = JSON.stringify(buildGeoJSON(points), null, 2); mime = 'application/geo+json'; }
-
-      if (dirHandle && (await verifyPermission(dirHandle, true))) {
-        const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(new Blob([dataStr], { type: mime }));
-        await writable.close();
-        toast(`保存しました: ${filename}`);
-      } else {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob([dataStr], { type: mime }));
-        a.download = filename;
-        document.body.appendChild(a); a.click(); a.remove();
-        toast('ダウンロードを開始しました');
-      }
-    } catch (e) {
-      console.error(e);
-      toast('保存に失敗しました');
-    }
+    sayNext();
   }
 
-  function buildGeoJSON(pts) {
-    return {
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        properties: {
-          name: 'Recorded Track',
-          points: pts.length,
-          distance_m: Math.round(distMeters)
-        },
-        geometry: {
-          type: 'LineString',
-          coordinates: pts.map(p => [p.lng, p.lat])
-        }
-      }]
-    };
-  }
+  async function saveTrack(fmt){ if(points.length<2){toast('保存できる軌跡がありません');return;} const nameRaw=(document.getElementById('fname').value||defaultFileName()).trim(); const safe=nameRaw.replace(/[^\w\-_.]/g,'_'); const filename=fmt==='gpx'?`${safe}.gpx`:`${safe}.geojson`; try{let dataStr,mime;if(fmt==='gpx'){dataStr=buildGPX(points);mime='application/gpx+xml';}else{dataStr=JSON.stringify(buildGeoJSON(points),null,2);mime='application/geo+json';} if(dirHandle&&(await verifyPermission(dirHandle,true))){const fileHandle=await dirHandle.getFileHandle(filename,{create:true}); const writable=await fileHandle.createWritable(); await writable.write(new Blob([dataStr],{type:mime})); await writable.close(); toast(`保存しました: ${filename}`);} else {const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([dataStr],{type:mime})); a.download=filename; document.body.appendChild(a); a.click(); a.remove(); toast('ダウンロードを開始しました');}}catch(e){console.error(e); toast('保存に失敗しました');}}
 
-  function buildGPX(pts) {
-    const esc = s => s.replace(/[<&>]/g, c => ({'<':'&lt;','&':'&amp;','>':'&gt;'}[c]));
-    const trkpts = pts.map(p => `      <trkpt lat="${p.lat}" lon="${p.lng}">\n        <time>${p.t}</time>\n      </trkpt>`).join('\n');
-    return `<?xml version="1.0" encoding="UTF-8"?>\n`+
-`<gpx version="1.1" creator="Route Aid" xmlns="http://www.topografix.com/GPX/1/1">\n`+
-`  <trk>\n`+
-`    <name>${esc(document.getElementById('fname').value || 'Recorded Track')}</name>\n`+
-`    <trkseg>\n`+
-`${trkpts}\n`+
-`    </trkseg>\n`+
-`  </trk>\n`+
-`</gpx>`;
-  }
+  function buildGeoJSON(pts){return {type:'FeatureCollection',features:[{type:'Feature',properties:{name:'Recorded Track',points:pts.length,distance_m:Math.round(distMeters)},geometry:{type:'LineString',coordinates:pts.map(p=>[p.lng,p.lat])}}]}};
+  function buildGPX(pts){const esc=s=>s.replace(/[<&>]/g,c=>({'<':'&lt;','&':'&amp;','>':'&gt;'}[c])); const trkpts=pts.map(p=>`      <trkpt lat="${p.lat}" lon="${p.lng}">\n        <time>${p.t}</time>\n      </trkpt>`).join('\n'); return `<?xml version="1.0" encoding="UTF-8"?>\n`+`<gpx version="1.1" creator="Route Aid" xmlns="http://www.topografix.com/GPX/1/1">\n`+`  <trk>\n`+`    <name>${esc(document.getElementById('fname').value||'Recorded Track')}</name>\n`+`    <trkseg>\n`+`${trkpts}\n`+`    </trkseg>\n`+`  </trk>\n`+`</gpx>`;}
 
-  async function pickDirectory() {
-    if (!('showDirectoryPicker' in window)) { toast('このブラウザはフォルダ指定に未対応です。ダウンロード保存をご利用ください'); return; }
-    try {
-      dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      if (await verifyPermission(dirHandle, true)) {
-        document.getElementById('dirLabel').textContent = '指定済み';
-        toast('保存先フォルダを指定しました');
-      }
-    } catch (e) {
-      if (e && e.name !== 'AbortError') console.warn(e);
-    }
-  }
+  async function pickDirectory(){ if(!('showDirectoryPicker' in window)){toast('未対応ブラウザ'); return;} try{dirHandle=await window.showDirectoryPicker({mode:'readwrite'}); if(await verifyPermission(dirHandle,true)){document.getElementById('dirLabel').textContent='指定済み'; toast('保存先フォルダを指定しました');}}catch(e){if(e&&e.name!=='AbortError') console.warn(e);} }
+  async function verifyPermission(fileHandle,withWrite){const opts={}; if(withWrite) opts.mode='readwrite'; if((await fileHandle.queryPermission(opts))==='granted') return true; if((await fileHandle.requestPermission(opts))==='granted') return true; return false;}
 
-  async function verifyPermission(fileHandle, withWrite) {
-    const opts = {};
-    if (withWrite) opts.mode = 'readwrite';
-    if ((await fileHandle.queryPermission(opts)) === 'granted') return true;
-    if ((await fileHandle.requestPermission(opts)) === 'granted') return true;
-    return false;
-  }
+  function haversine(lat1,lon1,lat2,lon2){const R=6371000; const toRad=d=>d*Math.PI/180; const dLat=toRad(lat2-lat1); const dLon=toRad(lon2-lon1); const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2; const c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); return R*c;}
 
-  // ====== 距離（メートル）計算（Haversine） ======
-  function haversine(lat1, lon1, lat2, lon2) {
-    const R = 6371000; // m
-    const toRad = d => d * Math.PI / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a = Math.sin(dLat/2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) ** 2;
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  }
+  function setRunStatus(mode){const text=document.getElementById('runStatusText'); const pill=document.getElementById('runStatus'); if(!pill||!text) return; pill.classList.remove('status-idle','status-running','status-paused','status-stopped'); if(mode==='running'){pill.classList.add('status-running'); text.textContent='追跡中'; document.title='● 追跡中 – Route Aid';} else if(mode==='paused'){pill.classList.add('status-paused'); text.textContent='一時停止'; document.title='⏸ 一時停止 – Route Aid';} else if(mode==='stopped'){pill.classList.add('status-stopped'); text.textContent='停止'; document.title='Route Aid – 追跡＆軌跡保存';} else {pill.classList.add('status-idle'); text.textContent='待機中'; document.title='Route Aid – 追跡＆軌跡保存';}}
 
-  function setRunStatus(mode){
-    const pill = document.getElementById('runStatus');
-    const text = document.getElementById('runStatusText');
-    if (!pill || !text) return;
-    pill.classList.remove('status-idle','status-running','status-paused','status-stopped');
-    if (mode==='running'){ pill.classList.add('status-running'); text.textContent='追跡中'; document.title='● 追跡中 – Route Aid'; }
-    else if (mode==='paused'){ pill.classList.add('status-paused'); text.textContent='一時停止'; document.title='⏸ 一時停止 – Route Aid'; }
-    else if (mode==='stopped'){ pill.classList.add('status-stopped'); text.textContent='停止'; document.title='Route Aid – 追跡＆軌跡保存'; }
-    else { pill.classList.add('status-idle'); text.textContent='待機中'; document.title='Route Aid – 追跡＆軌跡保存'; }
-  }
-
-  function updateElapsed(){
-    if (!startTime) return;
-    const now=new Date();
-    const sec=Math.floor((now-startTime)/1000);
-    const h=Math.floor(sec/3600).toString().padStart(2,'0');
-    const m=Math.floor((sec%3600)/60).toString().padStart(2,'0');
-    const s=(sec%60).toString().padStart(2,'0');
-    document.getElementById('elapsed').textContent=`${h}:${m}:${s}`;
-  }
-
-  // 起動
-  init();
-  setRunStatus('idle');
-</script>
-</body>
-</html>
+  function updateElapsed(){if(!startTime) return; const now=new Date(); const sec=Math.floor((now-startTime)/1000); const h=String(Math.floor(sec/3600)).padStart(2,'0'); const m=String(Math.floor((sec%3600)/60)).padStart(2,'0'); const s=String(sec%
