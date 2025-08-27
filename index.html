@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>実車評価支援ツール</title>
-<link rel="stylesheet" href="leaflet.css?v=250839" />
+<link rel="stylesheet" href="leaflet.css?v=250840" />
 <style>
   html,body,#map{height:100%;margin:0}
   #map{background:#f2f2f2}
@@ -40,11 +40,20 @@
   }
   .dot{width:10px;height:10px;border-radius:50%;background:#fff;animation:blink 1s infinite}
   @keyframes blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
+
+  /* 画面下のトースト */
+  #toast{
+    position:absolute;left:50%;bottom:78px;transform:translateX(-50%);
+    z-index:1002;display:none;max-width:min(92vw,520px);
+    background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:12px;
+    box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px
+  }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="recBadge"><span class="dot"></span>追跡中</div>
+<div id="toast"></div>
 
 <div id="panel">
   <h1>実車評価支援ツール</h1>
@@ -84,7 +93,7 @@
 
 <button id="fab-recenter">📍</button>
 
-<script src="leaflet.js?v=250839"></script>
+<script src="leaflet.js?v=250840"></script>
 
 <!-- 画像ファイル不要のSVGピン（「？」対策） -->
 <script>
@@ -96,8 +105,8 @@
 })();
 </script>
 
-<script src="jszip.min.js?v=250839"></script>
-<script src="togeojson.umd.js?v=250839"></script>
+<script src="jszip.min.js?v=250840"></script>
+<script src="togeojson.umd.js?v=250840"></script>
 
 <script>
 /* ====== Map ====== */
@@ -113,9 +122,8 @@ let lastLatLng=null, tracking=false, watchId=null, pulseTimer=null;
 let notifyMeters=100;
 let routeLayer=null;
 const routePointLayers=[];
-/* 誤発話抑制＆解禁（スタート後すぐの多発防止） */
-let announceEnabled=false, startPos=null, trackingStartedAt=0;
-const ENABLE_AFTER_METERS=30, ENABLE_AFTER_SECONDS=8;
+/* 「解禁待ち」は廃止 → 開始直後から判定 */
+let trackingStartedAt=0;
 
 /* ====== DOM ====== */
 const $file=document.getElementById('file');
@@ -131,15 +139,16 @@ const $th=document.getElementById('th');
 const $thv=document.getElementById('thv');
 const $stat=document.getElementById('stat');
 const $recBadge=document.getElementById('recBadge');
+const $toast=document.getElementById('toast');
 
-/* ====== 音声（iOS強化） ====== */
+/* ====== 音声（iOS強化）＋ビープ ====== */
 let voiceReady=false, audioCtx=null;
 function getCtx(){ return audioCtx ||= new (window.AudioContext||window.webkitAudioContext)(); }
 function ensureAudio(){ try{ getCtx().resume(); }catch(_){} }
 function preloadVoices(){ try{ speechSynthesis.getVoices(); }catch(_){} }
 window.speechSynthesis?.addEventListener?.('voiceschanged', preloadVoices); preloadVoices();
 
-/* 解錠だけ（ここでは喋らない） */
+/* 解錠のみ */
 function unlockTTS(){
   try{
     ensureAudio();
@@ -149,7 +158,6 @@ function unlockTTS(){
     voiceReady=true;
   }catch(e){ console.warn(e); }
 }
-/* ゆっくり話す */
 function speak(text){
   if(!voiceReady){ unlockTTS(); }
   ensureAudio();
@@ -162,6 +170,24 @@ function speak(text){
     if(speechSynthesis.speaking||speechSynthesis.pending){ speechSynthesis.cancel(); setTimeout(speakNow,50); } else { speakNow(); }
   }catch(e){ console.warn(e); }
 }
+/* 発話が無音でも気づける短いビープ */
+function beep(ms=160, freq=880){
+  try{
+    ensureAudio();
+    const ctx=getCtx(), o=ctx.createOscillator(), g=ctx.createGain();
+    g.gain.setValueAtTime(0.08, ctx.currentTime);
+    o.frequency.value=freq; o.type='sine';
+    o.connect(g).connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + ms/1000);
+  }catch(e){}
+}
+/* 画面トースト */
+let toastTimer=null;
+function toast(msg){
+  $toast.textContent=msg; $toast.style.display='block';
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>{$toast.style.display='none';}, 2200);
+}
+
 function isStartName(name){ const n=(name||'').trim(); return /^start$/i.test(n)||/^スタート$/i.test(n); }
 
 /* ====== ルート読込（KML/KMZ） ====== */
@@ -178,7 +204,7 @@ $file.addEventListener('change', async (ev)=>{
       const zip=await JSZip.loadAsync(buf);
       const kmlEntry=Object.values(zip.files).find(z=>z.name.toLowerCase().endsWith('.kml'));
       if(!kmlEntry){ alert('KMZ内にKMLがありません'); return; }
-      kmlText=await kmlEntry.async('string'); // iOSはstringが安定
+      kmlText=await kmlEntry.async('string');
     }else{
       kmlText=await f.text();
     }
@@ -198,64 +224,56 @@ $file.addEventListener('change', async (ev)=>{
     }).addTo(map);
 
     try{ map.fitBounds(routeLayer.getBounds(),{padding:[20,20]}); }catch(_){}
-    // 追跡中に差し替えた場合でも即チェック
-    if (tracking && announceEnabled && lastLatLng) announceInsideAtEnable(L.latLng(lastLatLng));
+    // 追跡中なら現在地ですぐチェック
+    if (tracking && lastLatLng) checkNearOnce(L.latLng(lastLatLng));
   }catch(e){ console.warn(e); alert('ファイル読込に失敗：'+(e?.message||e)); }
 });
 
-/* ====== 読み上げロジック ====== */
-/* 解禁直後：すでに半径内のポイントを読む */
-function announceInsideAtEnable(here){
-  const list=[...routePointLayers,...Object.values(checkpointLayer._layers||{})];
+/* ====== 読み上げ：半径内なら必ず一度だけ ====== */
+function checkNearOnce(here){
+  const list=[...routePointLayers, ...Object.values(checkpointLayer._layers||{})];
   for(const layer of list){
-    if(!layer?.getLatLng||layer._announced) continue;
-    const dist=map.distance(here,layer.getLatLng());
-    layer._lastDist=dist;
-    if(dist<=notifyMeters){
-      const p=layer.feature?.properties||{};
-      const name=(p.name||'').trim(), memo=(p.memo||'').trim();
-      const justStarted=(Date.now()-trackingStartedAt)<120000;
-      if(isStartName(name)&&justStarted) continue;
-      const parts=[]; if(name) parts.push(name); if(memo) parts.push(memo);
-      if(parts.length) speak(parts.join('。'));
-      layer._announced=true;
-    }
-  }
-}
-/* 通常：半径内なら必ず一度だけ読む（取り逃し防止） */
-function maybeAnnounceNear(here){
-  const list=[...routePointLayers,...Object.values(checkpointLayer._layers||{})];
-  for(const layer of list){
-    if(!layer?.getLatLng||layer._announced) continue;
-    const dist=map.distance(here,layer.getLatLng());
-    layer._lastDist=dist;
+    if(!layer?.getLatLng || layer._announced) continue;
+    const dist=map.distance(here, layer.getLatLng());
+    layer._lastDist = dist;
+
     const p=layer.feature?.properties||{};
-    const name=(p.name||'').trim(), memo=(p.memo||'').trim();
-    const justStarted=(Date.now()-trackingStartedAt)<120000;
-    if(isStartName(name)&&justStarted) continue;
-    if(dist<=notifyMeters){
+    const name=(p.name||'').trim();
+    const memo=(p.memo||'').trim();
+
+    // START/スタートは誤発話になることが多いのでスキップ
+    if (isStartName(name)) continue;
+
+    if(dist <= notifyMeters){
       const parts=[]; if(name) parts.push(name); if(memo) parts.push(memo);
-      if(parts.length) speak(parts.join('。'));
-      layer._announced=true;
+      const text = parts.join('。') || 'チェックポイント';
+      // UI通知 ＋ 音（TTS + ビープ）
+      toast(text);
+      beep(140, 880);
+      speak(text);
+      layer._announced = true;
     }
   }
 }
 
 /* ====== 操作 ====== */
-document.getElementById('tts').onclick=()=>{ unlockTTS(); setTimeout(()=>speak('テストです'),120); };
+document.getElementById('tts').onclick=()=>{ unlockTTS(); setTimeout(()=>{ toast('テストです'); beep(); speak('テストです'); },120); };
 $th.oninput=()=>{ notifyMeters=+$th.value; $thv.textContent=`${notifyMeters}m`; };
 
 $track.onclick=()=>{
   if(tracking) return;
   unlockTTS();
-  setTimeout(()=>speak('評価を開始します'),120);   // スタート時の発話
+  setTimeout(()=>{ toast('評価を開始します'); beep(120,880); speak('評価を開始します'); },120);
+
   tracking=true;
   $track.disabled=true; $stop.disabled=false;
   $recBadge.style.display='flex'; startPulse();
   trackLine.setLatLngs([]);
   checkpointLayer.clearLayers();
 
-  trackingStartedAt=Date.now(); announceEnabled=false; startPos=null;
+  trackingStartedAt=Date.now();
+
+  // 既存ポイントの状態をリセット
   routePointLayers.forEach(l=>{ l._announced=false; l._lastDist=Infinity; });
   Object.values(checkpointLayer._layers||{}).forEach(l=>{ l._announced=false; l._lastDist=Infinity; });
 
@@ -265,20 +283,11 @@ $track.onclick=()=>{
     trackLine.addLatLng(lastLatLng);
 
     const here=L.latLng(lastLatLng);
-    if(!startPos) startPos=here;
-    const moved=startPos.distanceTo(here);
-
-    if(!announceEnabled){
-      const elapsed=Date.now()-trackingStartedAt;
-      if(moved>=ENABLE_AFTER_METERS || elapsed>=ENABLE_AFTER_SECONDS*1000){
-        announceEnabled=true;
-        announceInsideAtEnable(here);
-      }
-    }else{
-      maybeAnnounceNear(here);
-    }
-  },err=>{ $stat.textContent=`位置エラー: ${err.message}`; },
-  {enableHighAccuracy:true,maximumAge:1000,timeout:10000});
+    // ★ 毎回：半径内なら必ず一度だけチェック
+    checkNearOnce(here);
+  },err=>{
+    $stat.textContent=`位置エラー: ${err.message}`;
+  },{enableHighAccuracy:true,maximumAge:1000,timeout:10000});
 };
 
 $stop.onclick=()=>{
@@ -296,6 +305,8 @@ $chk.onclick=()=>{
   m.feature={properties:{name:'チェックポイント', memo:memo||''}};
   m.bindPopup(memo?`<b>CP</b><br>${memo}`:"<b>CP</b>");
   m._announced=false; m._lastDist=Infinity;
+  // 追加直後、もし今すでに半径内なら読む
+  checkNearOnce(L.latLng(lastLatLng));
 };
 
 $rec.onclick=()=>{ if(lastLatLng) map.setView(lastLatLng,16); };
@@ -305,7 +316,7 @@ $fab.onclick=()=>$rec.click();
 function startPulse(){ let up=true; pulseTimer=setInterval(()=>{ let r=me.options.radius; r=up?Math.min(11,r+0.5):Math.max(7,r-0.5); me.setStyle({radius:r}); if(r>=11)up=false; if(r<=7)up=true; },80); }
 function stopPulse(){ clearInterval(pulseTimer); pulseTimer=null; me.setStyle({radius:7}); }
 
-/* 初回位置 */
+/* 初回位置（許可を誘発） */
 if(navigator.geolocation){
   navigator.geolocation.getCurrentPosition(pos=>{
     lastLatLng=[pos.coords.latitude,pos.coords.longitude];
