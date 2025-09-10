@@ -1,6 +1,6 @@
 // ----- Service Worker for Route-Aid -----
 // キャッシュ名のバージョンを上げると、強制的に新SW & 新キャッシュに切替わります。
-const VERSION     = 'v4';
+const VERSION     = 'v5'; // バージョンを上げました
 const APP_CACHE   = `route-aid-app-${VERSION}`;
 const TILE_CACHE  = `route-aid-tiles-${VERSION}`;
 
