@@ -436,6 +436,15 @@ document.getElementById('togglePanel').addEventListener('click', ()=>{
   document.getElementById('panel').classList.toggle('is-hidden');
 });
 
+/* === TTS iOS/Safari 安定化（追記） === */
+let audioCtx; let ttsPrimed=false;
+function initAudioUnlock(){ try{ if(!audioCtx){ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); } if(audioCtx.state==='suspended') audioCtx.resume(); }catch{} }
+function waitForVoices(){ return new Promise(resolve=>{ const v=window.speechSynthesis?.getVoices?.(); if(v&&v.length){ return resolve(v);} const t=setTimeout(()=>resolve(window.speechSynthesis?.getVoices?.()||[]),1000); try{ window.speechSynthesis.onvoiceschanged=()=>{ clearTimeout(t); resolve(window.speechSynthesis.getVoices()); }; }catch{} }); }
+async function ensureTTSReady(){ if(!('speechSynthesis' in window)) return false; initAudioUnlock(); try{ window.speechSynthesis.resume(); }catch{} await waitForVoices(); if(!ttsPrimed){ try{ const u=new SpeechSynthesisUtterance(' '); u.volume=0; window.speechSynthesis.speak(u);}catch{} ttsPrimed=true;} return true; }
+function enqueueSpeech(texts){ (async()=>{ if(!('speechSynthesis' in window)) { toast('この端末は読み上げ非対応'); return; } const ok=await ensureTTSReady(); if(!ok) return; try{ for(const tx of texts){ const u=new SpeechSynthesisUtterance(String(tx)); window.speechSynthesis.speak(u);} }catch(e){ console.error(e);} })(); }
+['touchstart','click'].forEach(evt=>{ window.addEventListener(evt, ()=>{ initAudioUnlock(); try{ window.speechSynthesis.resume(); }catch{} }, {once:true, capture:true}); });
+// テストボタンがあれば動作確認
+(document.getElementById('ttsTest')||{}).onclick = ()=> enqueueSpeech(['音声テストです']);
 </script>
 </body>
 </html>
