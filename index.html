@@ -25,7 +25,7 @@
   #stop{background:#ef4444;color:#fff;border-color:#ef4444}
   #recenter{background:#0ea5e9;color:#fff;border-color:#0ea5e9}
   #cp{background:#f59e0b;color:#fff;border-color:#f59e0b}
-  #saveGpx{background:#6366f1;color:#fff;border-color:#6366f1}
+  #saveGpx,#saveGeo{background:#6366f1;color:#fff;border-color:#6366f1}
   #fabStop{position:fixed; right:calc(12px + env(safe-area-inset-right)); bottom:calc(12px + env(safe-area-inset-bottom));
     z-index:2147483200; display:none; width:84px;height:84px;border-radius:50%; box-shadow:0 12px 36px rgba(0,0,0,.28);
     border:none; background:#ef4444;color:#fff;font-size:16px;font-weight:700;}
@@ -42,32 +42,13 @@
   #compassArrow{width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:14px solid #ef4444;transform-origin:50% 90%}
   #fname{max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .counts{font-size:11px;color:#334155;background:#f1f5f9;border-radius:9999px;padding:2px 8px}
-
-  .hidden{display:none}
-
-  .field{margin:8px 0}
 </style>
 </head>
 <body>
 <div id="map"></div>
 
-
-<button id="menuToggle" aria-expanded="true" aria-controls="panel" title="メニューの表示/非表示"
-  style="position:fixed;left:10px;top:calc(10px + env(safe-area-inset-top));z-index:2147483600;
-         width:44px;height:44px;border-radius:12px;border:1px solid #ddd;background:#fff;
-         box-shadow:0 6px 18px rgba(0,0,0,.15);display:grid;place-items:center;">
-  <span style="width:20px;height:2px;background:#111;box-shadow:0 6px 0 #111, 0 -6px 0 #111;"></span>
-</button>
-
 <div id="panel">
-<div class="field">
-  <label style="display:flex;align-items:center;gap:.5rem;">
-    <input type="checkbox" id="menuShowToggle">
-    メニュー画面（パネル）を表示する
-  </label>
-</div>
-
-<h1>実車評価支援ツール</h1>
+  <h1>実車評価支援ツール</h1>
 
   <!-- 複数ファイル入力 + 切替セレクタ -->
   <div class="row">
@@ -110,6 +91,7 @@
 
   <div class="row">
     <button id="saveGpx" disabled>GPX保存</button>
+    <button id="saveGeo" disabled>GeoJSON保存</button>
     <span id="stat" class="small"></span>
   </div>
 </div>
@@ -155,7 +137,7 @@
   const cpBtn=document.getElementById('cp');
   const stat=document.getElementById('stat');
   const counts=document.getElementById('counts');
-  const saveGpx=document.getElementById('saveGpx');
+  const saveGpx=document.getElementById('saveGpx'),saveGeo=document.getElementById('saveGeo');
   const fname=document.getElementById('fname');
 
   /* ==== 画面オフ防止 ==== */
@@ -194,7 +176,7 @@
   }
 
   /* ==== TTS ==== */
-  let ttsQueue=[],speaking=false,jpVoice=(()=>{const vs=speechSynthesis.getVoices();const ja=vs.filter(v=>/ja/i.test(v.lang));const names=['Kyoko','Mizuki','Sakura','Hina','Siri (Japanese) - Female','Kyoko (Enhanced)'];return ja.find(v=>names.some(n=>v.name.indexOf(n)>-1))||ja.find(v=>/female|女/i.test(v.name))||ja[0]||vs[0]||null;})();
+  let ttsQueue=[],speaking=false,jpVoice=null,ttsUnlocked=false,ttsRate=1.0;
   const $ttsRate=document.getElementById('ttsRate'),$ttsRateVal=document.getElementById('ttsRateVal');
   $ttsRate.addEventListener('input',()=>{ttsRate=+$ttsRate.value; $ttsRateVal.textContent=ttsRate.toFixed(1);});
   function unlockTTS(){if(ttsUnlocked)return;ttsUnlocked=true; speechSynthesis.cancel(); jpVoice=speechSynthesis.getVoices().find(v=>/ja-JP|japan/i.test(v.lang))||speechSynthesis.getVoices()[0]||null;}
@@ -431,7 +413,7 @@
     start.disabled=false; stop.disabled=true; fabStop.style.display='none'; document.getElementById('recBadge').style.display='none';
     rotateMap(0); $compass.style.display='none';
     unlockTTS(); enqueueSpeech(['評価を終了します']);
-    saveGpx.disabled=false;
+    saveGpx.disabled=false; saveGeo.disabled=false;
     cpBtn.disabled=true;
   }
   start.addEventListener('click', startTracking);
@@ -459,13 +441,24 @@
     const gpx = buildGPX(trackLine.getLatLngs(), cps);
     downloadText(gpx, `track_${formatTs()}.gpx`, 'application/gpx+xml');
   });
-downloadText(JSON.stringify(gj,null,2), `track_${formatTs()}.geo.json`, 'application/geo+json');
+  saveGeo.addEventListener('click',()=>{
+    const gj = buildGeoJSON(trackLine.getLatLngs(), cps);
+    downloadText(JSON.stringify(gj,null,2), `track_${formatTs()}.geo.json`, 'application/geo+json');
   });
 
   function buildGPX(latlngs, cps){
     const trkpts = latlngs.map(ll=>`<trkpt lat="${ll.lat}" lon="${ll.lng}"></trkpt>`).join('');
     const wpts   = cps.map(c=>`<wpt lat="${c.latlng[0]}" lon="${c.latlng[1]}"><name>${escapeXML(c.memo||'CP')}</name></wpt>`).join('');
     return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="DriveEval" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>drive</name><trkseg>${trkpts}</trkseg></trk>${wpts}</gpx>`;
+  }
+  function buildGeoJSON(latlngs, cps){
+    return {
+      type:'FeatureCollection',
+      features:[
+        {type:'Feature',properties:{type:'track'},geometry:{type:'LineString',coordinates:latlngs.map(ll=>[ll.lng,ll.lat])}},
+        ...cps.map(c=>({type:'Feature',properties:{type:'checkpoint',memo:c.memo},geometry:{type:'Point',coordinates:[c.latlng[1],c.latlng[0]]}}))
+      ]
+    };
   }
   function downloadText(text, name, mime){
     try{
@@ -516,63 +509,6 @@ downloadText(JSON.stringify(gj,null,2), `track_${formatTs()}.geo.json`, 'applica
       navigator.serviceWorker.addEventListener('controllerchange',()=> location.reload());
     }).catch(()=>{});
   }
-
-  
-  // ==== メニュー表示/非表示 ====
-  (function(){
-    const btn = document.getElementById('menuToggle');
-    const panel = document.getElementById('panel');
-    let visible = true;
-    function sync(){ if(visible){ panel.classList.remove('hidden'); btn.setAttribute('aria-expanded','true'); }
-                     else{ panel.classList.add('hidden'); btn.setAttribute('aria-expanded','false'); } }
-    btn.addEventListener('click', ()=>{ visible = !visible; sync(); });
-    // 初期同期
-    sync();
-  })();
-
-  // ==== メニュー画面 表示/非表示トグル（チェックボックス） ====
-  (function(){
-    const chk = document.getElementById('menuShowToggle');
-    const panel = document.getElementById('panel');
-    const btn = document.getElementById('menuToggle'); // 左上ハンバーガー
-    // 既存の hidden クラスを利用
-    function apply(visible){
-      if(visible){
-        panel.classList.remove('hidden');
-        btn.setAttribute('aria-expanded','true');
-      }else{
-        panel.classList.add('hidden');
-        btn.setAttribute('aria-expanded','false');
-      }
-    }
-    // 保存値の復元（デフォルト：表示）
-    const saved = localStorage.getItem('panelVisible');
-    const isVisible = saved === null ? true : saved === '1';
-    chk.checked = isVisible;
-    apply(isVisible);
-
-    // チェックで切替
-    chk.addEventListener('change', (e)=>{
-      const v = !!e.target.checked;
-      localStorage.setItem('panelVisible', v ? '1' : '0');
-      apply(v);
-    });
-
-    // ハンバーガーでも連動（ボタンでトグルされたらチェックも同期）
-    if(btn){
-      const origClickHandlers = [];
-      // wrap: 既に登録済みのclickハンドラはそのまま（上書き回避）。
-      // ここではボタンのクリック後の状態を監視して同期するだけ。
-      const observer = new MutationObserver(()=>{
-        const expanded = btn.getAttribute('aria-expanded') === 'true';
-        if(chk.checked !== expanded){
-          chk.checked = expanded;
-          localStorage.setItem('panelVisible', expanded ? '1' : '0');
-        }
-      });
-      observer.observe(btn, { attributes:true, attributeFilter:['aria-expanded'] });
-    }
-  })();
 
   /* ==== 追跡UIとFAB ==== */
   document.getElementById('stop').addEventListener('click', stopTracking);
