@@ -198,6 +198,17 @@ function updateDatasetSelectOptions(){
   datasetSelect.innerHTML = datasets.map((ds,i)=>`<option value="${i}" ${i===datasets.length-1?'selected':''}>${ds.name}（${ds.pois.length}点）</option>`).join('');
   applyDatasetSelection(String(datasets.length-1));
 }
+function fitToDataset(ds){
+  try{
+    const b = ds.group.getBounds();
+    if(b && b.isValid && b.isValid()){
+      map.fitBounds(b, {padding:[40,40]});
+    }
+  }catch(e){ console.warn(e); }
+}
+  datasetSelect.innerHTML = datasets.map((ds,i)=>`<option value="${i}" ${i===datasets.length-1?'selected':''}>${ds.name}（${ds.pois.length}点）</option>`).join('');
+  applyDatasetSelection(String(datasets.length-1));
+}
 function applyDatasetSelection(index){
   const idx = parseInt(index,10);
   datasets.forEach((ds,i)=>{ if(i===idx){ map.addLayer(ds.group); } else { map.removeLayer(ds.group); }});
@@ -235,8 +246,8 @@ async function handleFiles(files){
           const dom = new DOMParser().parseFromString(text, 'application/xml');
           dom.querySelectorAll('wpt').forEach(w=> addPoi(parseFloat(w.getAttribute('lat')), parseFloat(w.getAttribute('lon')), {name:w.querySelector('name')?.textContent||''}, ds));
           dom.querySelectorAll('trkseg trkpt').forEach(tp=> addRoutePin(parseFloat(tp.getAttribute('lat')), parseFloat(tp.getAttribute('lon')), {}, ds));
-          toast(`${f.name} を読み込み`);
-          datasets.push(ds); updateDatasetSelectOptions();
+          toast(`${f.name} を読み込み（ポイント${ds.pois.length}）`);
+datasets.push(ds); updateDatasetSelectOptions(); fitToDataset(ds);
         }catch(e){ console.error(e); toast('GPX読込失敗'); }
         continue;
       }else{
@@ -259,7 +270,7 @@ async function handleFiles(files){
             else addPoi(lat,lng,{name}, ds);
           }
         }
-        toast(`${f.name} を読み込み`); datasets.push(ds); updateDatasetSelectOptions();
+        toast(`${f.name} を読み込み（ポイント${ds.pois.length}）`); datasets.push(ds); updateDatasetSelectOptions(); fitToDataset(ds);
       }catch(e){ console.error(e); toast('KML読込失敗'); }
     }
   }
