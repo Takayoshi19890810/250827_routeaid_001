@@ -15,6 +15,7 @@
     min-width:300px; max-width:min(94vw,560px);
     transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
   }
+  /* メニュー非表示スタイル */
   #panel.hidden {
     opacity: 0;
     pointer-events: none;
@@ -39,6 +40,7 @@
     background:rgba(239,68,68,.95); color:#fff; padding:6px 10px; border-radius:9999px; box-shadow:0 6px 24px rgba(0,0,0,.18); font-size:12px}
   .dot{width:10px;height:10px;border-radius:50%;background:#fff;animation:blink 1s infinite}
   @keyframes blink{0%,60%{opacity:1}61%,100%{opacity:0}}
+  /* メニュー切り替えボタン */
   #menu-toggle {
     position: fixed; right: 12px; bottom: 12px; z-index: 2147483200;
     width: 60px; height: 60px; border-radius: 50%;
@@ -56,7 +58,7 @@
   <h1>実車評価支援ツール</h1>
   <div class="row">
     <label for="file">ルート/チェックポイント読込:</label>
-    <input type="file" id="file" accept=".gpx,.kml,.kmz" />
+    <input type="file" id="file" accept=".gpx,.kml,application/vnd.google-earth.kmz" />
   </div>
   <div class="row">
     <button id="start">▶ 追跡開始</button>
@@ -65,7 +67,7 @@
   </div>
   <div class="row">
     <button id="recenter">現在地へ</button>
-    <button id="saveGpx">GPX保存</button>
+    <button id="saveGpx">GPX保存</button> 
   </div>
 </div>
 <button id="fabStop">停止</button>
@@ -74,7 +76,6 @@
 
 <script>
   'use strict';
-  /* GeoJSON関連のライブラリとボタンを削除しました */
 
   /* ==== 定数・変数 ==== */
   const mapElem = document.getElementById('map');
@@ -87,10 +88,10 @@
   const saveGpxBtn = document.getElementById('saveGpx');
   const recBadge = document.getElementById('recBadge');
   const panel = document.getElementById('panel');
-  const menuToggleBtn = document.getElementById('menu-toggle');
+  const menuToggleBtn = document.getElementById('menu-toggle'); // メニュー切り替えボタン
 
   let map;
-  let trackControl;
+  let trackControl; // 使用されていませんが、そのまま残します
   let lineFeature;
   let cpMarkers;
   let trackLine;
@@ -152,7 +153,8 @@
         alert('現在地が取得できませんでした。');
       });
     }
-
+    
+    // サービスワーカーの登録
     if(navigator.serviceWorker){
       navigator.serviceWorker.register('sw.js').then(reg=>{
         if(reg.waiting){ reg.waiting.postMessage({type:'SKIP_WAITING'}); }
@@ -170,25 +172,33 @@
     const file = event.target.files[0];
     if (!file) return;
 
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const zip = new JSZip();
-      await zip.loadAsync(arrayBuffer);
-      const kmlFile = zip.file(/\.kml$/i)[0];
+    // KMZファイルをZipとして処理
+    if (file.name.toLowerCase().endsWith('.kmz')) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const zip = new JSZip();
+        await zip.loadAsync(arrayBuffer);
+        const kmlFile = zip.file(/\.kml$/i)[0]; // .kmlファイルを探す
 
-      if (kmlFile) {
-        const kmlText = await kmlFile.async('text');
-        const parser = new DOMParser();
-        const kmlDoc = parser.parseFromString(kmlText, 'text/xml');
-        // KML処理ロジック...（ここでは省略）
+        if (kmlFile) {
+          const kmlText = await kmlFile.async('text');
+          const parser = new DOMParser();
+          const kmlDoc = parser.parseFromString(kmlText, 'text/xml');
+          // KML処理ロジック (toGeoJSONが不要になったため、kml処理はここでは省略します)
+          alert('KMZファイル内のKMLデータを読み込みました。ルート表示機能は別途実装が必要です。');
+        } else {
+          alert('KMZファイル内にKMLファイルが見つかりませんでした。');
+        }
+      } catch (e) {
+        console.error("KMZ処理エラー:", e);
+        alert('KMZファイルの処理中にエラーが発生しました。');
       }
-    } catch (e) {
-      // KMZではないKML/GPXの処理
+    } else {
+      // KML/GPXファイルをテキストとして処理 (toGeoJSONが不要になったため、ルート表示機能は別途実装が必要です)
       const reader = new FileReader();
       reader.onload = () => {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(reader.result, 'text/xml');
-        // KML/GPX処理ロジック...（ここでは省略）
+        // XML処理ロジック... (ここでは省略)
+        alert('GPX/KMLファイルを読み込みました。ルート表示機能は別途実装が必要です。');
       };
       reader.readAsText(file);
     }
@@ -197,6 +207,7 @@
   startBtn.addEventListener('click', () => {
     if (trackWatchId) return;
 
+    // トラックデータを初期化
     track.tracks[0].segments[0].points = [];
     track.tracks[0].name = `Track-${new Date().toISOString()}`;
     trackLine.setLatLngs([]);
@@ -233,7 +244,7 @@
     fabStopBtn.style.display = 'none';
     recBadge.style.display = 'none';
 
-    // 追跡終了時に保存を確認
+    // 追跡終了時に保存を確認する処理
     if (confirm('追跡終了時にGPXを保存しますか？')) {
         let fileName = prompt('保存するファイル名を入力してください:', 'track.gpx');
         if (fileName) {
@@ -270,6 +281,7 @@
     });
   });
 
+  // GPX保存ボタンの機能（任意保存用）
   saveGpxBtn.addEventListener('click', () => {
     let fileName = prompt('保存するファイル名を入力してください:', 'track.gpx');
     if (fileName) {
@@ -282,18 +294,23 @@
     }
   });
 
+  // メニュー表示/非表示の切り替え
   menuToggleBtn.addEventListener('click', () => {
     panel.classList.toggle('hidden');
+    // ボタンのアイコンも切り替えたい場合は、ここで処理を追加
+    // menuToggleBtn.textContent = panel.classList.contains('hidden') ? '☰' : '⚙'; 
   });
 
   /* ==== GPX保存機能 ==== */
   function saveGpxFile(fileName) {
+    // 走行データをGPXフォーマットのテキストに変換
     const text = `<gpx version="1.1" creator="Route-Aid" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd"><trk><name>${escapeHTML(track.tracks[0].name)}</name><trkseg>${track.tracks[0].segments[0].points.map(p => `<trkpt lat="${p.lat}" lon="${p.lon}"><time>${p.time}</time>${p.ele?`<ele>${p.ele}</ele>`:''}${p.speed?`<speed>${p.speed}</speed>`:''}${p.heading?`<geoloc:direction>${p.heading}</geoloc:direction>`:''}</trkpt>`).join('')}</trkseg></trk></gpx>`;
     
-    // 省略：ファイル保存ロジックは変更なし
     try{
       const blob = new Blob([text], {type:'application/gpx+xml'});
       const isiOS = /(iPhone|iPad|iPod)/i.test(navigator.userAgent);
+
+      // iOS対応
       if(isiOS){
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -305,6 +322,8 @@
         setTimeout(()=>URL.revokeObjectURL(blobUrl), 4000);
         return;
       }
+
+      // その他ブラウザ対応
       const opened = window.open('', '_blank');
       if (opened) {
           const url = URL.createObjectURL(blob);
@@ -322,6 +341,7 @@
               opened.close();
           }, 4000);
       } else {
+          // ポップアップがブロックされた場合の代替策
           const a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
           a.download = fileName;
@@ -334,6 +354,7 @@
     }
   }
 
+  // HTMLエスケープヘルパー関数
   function escapeHTML(str) {
     return str.replace(/[&<>"']/g, function(match) {
       const escape = {
