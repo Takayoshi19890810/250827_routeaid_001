@@ -11,7 +11,6 @@ const APP_ASSETS = [
   './leaflet.js',
   './leaflet.css',
   './jszip.min.js',
-  './togeojson.umd.js',
   './sw.js',
   './manifest.webmanifest',
   // Leafletのマーカー画像（ローカル参照）
@@ -36,50 +35,45 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    (async () => {
-      // 古いキャッシュを削除
-      const keys = await caches.keys();
-      await Promise.all(
-        keys
-          .filter((k) => k !== APP_CACHE && k !== TILE_CACHE)
-          .map((k) => caches.delete(k))
-      );
-      await self.clients.claim();
-    })()
+    caches.keys().then((keys) => Promise.all(
+      keys.filter((key) => key !== APP_CACHE && key !== TILE_CACHE)
+          .map((key) => caches.delete(key))
+    ))
   );
+  event.waitUntil(self.clients.claim());
 });
 
-// HTMLはネット優先（落ちたらキャッシュ）で最新化しやすく
-async function networkFirstHTML(req) {
-  try {
-    const fresh = await fetch(req);
-    const cache = await caches.open(APP_CACHE);
-    cache.put(req, fresh.clone());
-    return fresh;
-  } catch {
-    const cached = await caches.match(req);
-    return cached || new Response('Offline', { status: 503, statusText: 'Offline' });
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
   }
+});
+
+function networkFirstHTML(req) {
+  return caches.open(APP_CACHE).then(async (cache) => {
+    try {
+      const resp = await fetch(req);
+      if (resp.status === 200) await cache.put(req, resp.clone());
+      return resp;
+    } catch (e) {
+      const cached = await cache.match(req);
+      return cached || new Response(null, { status: 504 });
+    }
+  });
 }
 
-// アプリアセットはキャッシュ優先（オフライン即起動）
-async function cacheFirst(req) {
-  const cached = await caches.match(req);
-  if (cached) return cached;
-  const fresh = await fetch(req);
-  const cache = await caches.open(APP_CACHE);
-  cache.put(req, fresh.clone());
-  return fresh;
-}
+function tilesSWR(req) {
+  let cached = null;
+  const cachePromise = caches.open(TILE_CACHE).then(async (cache) => {
+    cached = await cache.match(req);
+    return cached;
+  });
 
-// タイルは Stale-While-Revalidate（表示優先で裏で更新）＋上限管理
-async function tilesSWR(req) {
-  const cache = await caches.open(TILE_CACHE);
-  const cached = await cache.match(req);
   const fetchPromise = fetch(req)
     .then(async (resp) => {
       // OSMはCORSの関係でopaqueになることがあるが、そのままキャッシュOK
       if (resp && (resp.status === 200 || resp.type === 'opaque')) {
+        const cache = await caches.open(TILE_CACHE);
         await cache.put(req, resp.clone());
         // キャッシュ上限を超えたら古いものから削除
         const keys = await cache.keys();
@@ -93,7 +87,7 @@ async function tilesSWR(req) {
     .catch(() => null);
 
   // まずキャッシュを即返し、裏で取得。キャッシュがなければネット優先。
-  return cached || fetchPromise || new Response(null, { status: 504 });
+  return cachePromise.then(cachedResp => cachedResp || fetchPromise || new Response(null, { status: 504 }));
 }
 
 self.addEventListener('fetch', (event) => {
@@ -115,19 +109,16 @@ self.addEventListener('fetch', (event) => {
   // 自アプリの静的ファイル（アセット）
   if (url.origin === self.location.origin) {
     // アプリ殻ファイルはキャッシュ優先
-    const isAppAsset = APP_ASSETS.some(p => url.pathname.endsWith(p.replace('./','/')));
+    const isAppAsset = APP_ASSETS.some(asset => url.pathname.endsWith(asset) || url.pathname.endsWith(`${asset.replace('./','')}`));
     if (isAppAsset) {
-      event.respondWith(cacheFirst(req));
+      event.respondWith(caches.match(req).then((response) => response || fetch(req)));
       return;
     }
+    // その他のリソースはキャッシュなしでネットワークへ
+    event.respondWith(fetch(req));
+    return;
   }
-
-  // それ以外は素通し（必要に応じて追加でキャッシュ戦略を定義）
-});
-
-// 新しいSWを即時有効化したい時用（pagesからpostMessage({type:'SKIP_WAITING'})）
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
+  
+  // その他
+  event.respondWith(fetch(req));
 });
