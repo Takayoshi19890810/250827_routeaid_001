@@ -131,6 +131,7 @@
 <div id="compass"><canvas width="100" height="100"></canvas></div>
 
 <script src="leaflet.js"></script>
+<script src="jszip.min.js"></script>
 <script src="togeojson.umd.js"></script>
 <script>
 'use strict';
@@ -236,9 +237,17 @@ async function handleFiles(files){
     let kmlText = '';
 
     if(/\.kmz$/i.test(name)){
-      // KMZ: ZIPからKML抽出
+      // KMZ: ZIPからKML抽出（UMDのJSZipをグローバル利用）
       try{
-        const {default: JSZip} = await import('./jszip.min.js');
+        const zip = await JSZip.loadAsync(buf);
+        const kmlEntry = Object.keys(zip.files).find(k=>/\.kml$/i.test(k));
+        if(kmlEntry){
+          kmlText = await zip.files[kmlEntry].async('string');
+        } else {
+          throw new Error('KMZ内にKMLが見つかりません');
+        }
+      }catch(e){ console.error(e); toast('KMZの展開に失敗'); }
+    } = await import('./jszip.min.js');
         const zip = await JSZip.loadAsync(buf);
         const kmlEntry = Object.keys(zip.files).find(k=>/\.kml$/i.test(k));
         if(kmlEntry){
