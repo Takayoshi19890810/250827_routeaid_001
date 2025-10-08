@@ -26,7 +26,6 @@
   button{padding:10px 14px; min-height:40px; border-radius:12px; cursor:pointer; border:1px solid #ddd; background:#fff;}
   select, input[type=range]{height:40px;border-radius:10px;border:1px solid #ddd;padding:0 8px}
   #start{background:#16a34a;color:#fff;border-color:#16a34a}
-  /* #stop{background:#ef4444;color:#fff;border-color:#ef4444} */ /* 削除対象のためコメントアウト */
   #recenter{background:#0ea5e9;color:#fff;border-color:#0ea5e9}
   #cp{background:#f59e0b;color:#fff;border-color:#f59e0b}
   #saveGpx{background:#6366f1;color:#fff;border-color:#6366f1}
@@ -190,6 +189,37 @@
   function escapeXML(s){ return escapeHTML(s); }
   function formatTs(){ const d=new Date(); const pad=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; }
 
+  /* ==== 通知音 ==== */
+  let audioCtx;
+  function playChime() {
+    try {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.7, audioCtx.currentTime + 0.05);
+      gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.5);
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(960, audioCtx.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(480, audioCtx.currentTime + 0.2);
+
+      oscillator.start(audioCtx.currentTime);
+      oscillator.stop(audioCtx.currentTime + 0.5);
+    } catch (e) {
+      console.error('Failed to play chime:', e);
+    }
+  }
+
   /* ==== ピン定義 ==== */
   function svg(color){return encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 36s10-12.2 10-20A10 10 0 1 0 2 16c0 7.8 10 20 10 20z" fill="${color}"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`)}
   const Blue=L.Icon.extend({options:{iconUrl:`data:image/svg+xml;utf8,${svg('#3b82f6')}`,iconSize:[24,36],iconAnchor:[12,34]}});
@@ -199,18 +229,15 @@
 
   /* ==== マップ ==== */
   const map=L.map('map',{zoomControl:false});
-  // ▼▼▼ 走行軌跡用のpaneとルート用のpaneを追加し、z-indexを設定 ▼▼▼
   map.createPane('routePane');
   map.getPane('routePane').style.zIndex = 300;
   map.createPane('trackPane');
   map.getPane('trackPane').style.zIndex = 450;
-  // ▲▲▲ 走行軌跡用のpaneとルート用のpaneを追加し、z-indexを設定 ▲▲▲
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'&copy; OpenStreetMap'}).addTo(map);
   map.setView([35.681,139.767], 16);
 
   /* ==== UI 要素 ==== */
   const start=document.getElementById('start');
-  // const stop=document.getElementById('stop'); // 削除
   const fabStop=document.getElementById('fabStop');
   const recenter=document.getElementById('recenter');
   const keepCentered=document.getElementById('keepCentered');
@@ -382,10 +409,8 @@
 
   /* ==== レイヤ ==== */
   const pointLayer=L.layerGroup().addTo(map);
-  // ▼▼▼ `routePane` を指定 ▼▼▼
   const routeMarkerLayer=L.layerGroup({pane: 'routePane'}).addTo(map);
   const routeLineLayer=L.layerGroup({pane: 'routePane'}).addTo(map);
-  // ▲▲▲ `routePane` を指定 ▲▲▲
   const trackLayer=L.layerGroup({pane: 'trackPane'}).addTo(map);
   const checkpointLayer=L.layerGroup().addTo(map);
 
@@ -405,10 +430,8 @@
     fillOpacity: 1
   }).addTo(map);
   
-  // ▼▼▼ 走行軌跡の線の太さと色を修正 ▼▼▼
   const trackLineCasing = L.polyline([], {color: '#16a34a', weight: 4, opacity: 0.8, pane: 'trackPane'}).addTo(trackLayer);
   const trackLine = L.polyline([], {color: '#22c55e', weight: 2, opacity: 0.95, pane: 'trackPane'}).addTo(trackLayer);
-  // ▲▲▲ 走行軌跡の線の太さと色を修正 ▲▲▲
 
   /* ==== データセット管理（複数ファイル切替） ==== */
   const datasetMap=new Map();
@@ -468,10 +491,8 @@
       (p.looksRoute? routeMarkerLayer: pointLayer).addLayer(m);
     }
     for(const ring of ds.routes){
-      // ▼▼▼ ルートの線の太さと色を修正 ▼▼▼
       const casing = L.polyline(ring, {color: '#854d0e', weight: 8, opacity: 0.85, pane: 'routePane'});
       const poly = L.polyline(ring, {color: '#f59e0b', weight: 5, opacity: 1, pane: 'routePane'});
-      // ▲▲▲ ルートの線の太さと色を修正 ▼▼▼
       routeLineLayer.addLayer(casing);
       routeLineLayer.addLayer(poly);
     }
@@ -516,10 +537,15 @@
   /* ==== 近接通知 ==== */
   const RENOTIFY_EVERY_M = 300;
   let notified = new Map();
+
+  // ▼▼▼ 変更 ▼▼▼
   function collectNearTexts(here){
     const ds = datasetMap.get(currentKey);
-    if(!ds) return [];
+    if(!ds) return { texts: [], containsScene: false };
+    
     const res=[];
+    let containsScene = false;
+
     ds.points.forEach((p, idx)=>{
       if(p.looksRoute) return;
       const d=here.distanceTo(p.latlng);
@@ -527,16 +553,27 @@
         const n=notified.get(idx) || {lastSpokeAtDist:-Infinity};
         if(!isFinite(n.lastSpokeAtDist) || (distanceTravelled - n.lastSpokeAtDist)>=RENOTIFY_EVERY_M){
           notified.set(idx, {lastSpokeAtDist:distanceTravelled});
+          if ((p.name || '').includes('シーン')) {
+            containsScene = true;
+          }
           res.push(`${p.name||'ポイント'}。${(p.desc||'').replace(/\s+/g,' ')}`);
         }
       }
     });
-    return res;
+    return { texts: res, containsScene: containsScene };
   }
+
   function checkNearAndSpeak(here){
-    const texts = collectNearTexts(here);
-    if(texts.length) { enqueueSpeech(texts); distanceTravelledSinceSpeak = 0; }
+    const result = collectNearTexts(here);
+    if(result.texts.length) {
+      if (result.containsScene) {
+        playChime();
+      }
+      enqueueSpeech(result.texts);
+      distanceTravelledSinceSpeak = 0;
+    }
   }
+  // ▲▲▲ 変更 ▲▲▲
 
   /* ==== 追跡 ==== */
   let tracking=false, watchId=null; let lastLatLng=null, prevLatLng=null; let startupSweepTimer=null;
@@ -584,7 +621,6 @@
     unlockTTS();
     tracking=true; 
     start.disabled=true; 
-    // stop.disabled=true; // 削除
     fabStop.style.display='grid'; 
     document.getElementById('recBadge').style.display='flex';
     enqueueSpeech(['評価を開始します']);
@@ -615,7 +651,6 @@
     navigator.geolocation.clearWatch?.(watchId); watchId=null;
     clearInterval(startupSweepTimer); clearInterval(gpsWeakTimer);
     start.disabled=false; 
-    // stop.disabled=true; // 削除
     fabStop.style.display='none'; 
     document.getElementById('recBadge').style.display='none';
     liveInfoPanel.style.display = 'none';
@@ -632,7 +667,6 @@
     filenameInput.value = defaultFilename;
   }
   start.addEventListener('click', startTracking);
-  // stop.addEventListener('click', stopTracking); // 削除
   fabStop.addEventListener('touchstart', (e)=>{ e.preventDefault(); stopTracking(); }, {passive:false});
   fabStop.addEventListener('click', stopTracking);
 
